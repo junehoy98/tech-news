@@ -182,9 +182,25 @@ IEDM, VLSI Symposium).
 crypto, software releases. Any story where the equipment-industry angle
 requires a stretch.
 
+**Analysis & opinion — score the insight, not the news hook.** Independent
+analysis, commentary, and forecasting (the `opinion` category) often has no
+discrete "event" to report, so don't penalize it for that. Score it on how
+much it sharpens the reader's understanding of the core companies and
+technologies: a substantive SemiAnalysis/Fabricated-Knowledge-style breakdown
+of WFE demand, a foundry's roadmap, or High-NA economics is **7–8**; a sharp
+take touching the core players is **6**. Generic market-trend punditry with no
+equipment specificity is still **≤ 5**. A pure-opinion piece and a hard-news
+item can share a `topic_tag` — the synthesizer may fold the analysis into the
+event's brief.
+
 ## Category mapping
 
 - **company** — about a specific target equipment company
 - **tech** — about underlying technology (lithography, metrology, etc.)
 - **policy** — export controls, subsidies, regulation, geopolitics
 - **business** — industry-wide moves, foundry capex, market share, M&A
+- **opinion** — independent analysis, commentary, or forecasting rather than
+  straight reporting (e.g. SemiAnalysis, Fabricated Knowledge). Use this when
+  the value is the author's *argument or interpretation*, not a news event.
+  Pick the topic category (company / tech / business) over `opinion` only when
+  the piece is essentially reporting that happens to run on an analysis site.
