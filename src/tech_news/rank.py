@@ -28,9 +28,14 @@ RANKING_MODEL = "claude-haiku-4-5"
 # "return EXACTLY N entries" request gets unreliable as N grows — the model
 # truncates (overflowing max_tokens → no parsed output → empty digest) or
 # silently drops fingerprints. Smaller batches keep each call well within the
-# output cap and localize any failure to one batch. The rubric is sent as a
-# cached system prompt, so batches 2..N read it from cache instead of
-# re-billing the full rubric each time.
+# output cap and localize any failure to one batch.
+#
+# The rubric is sent as a cache_control system block (see _score_batch). NOTE:
+# at its current ~2.5K tokens it sits below Haiku 4.5's effective minimum
+# cacheable prefix, so caching is a no-op today and the savings would be
+# negligible regardless (a small rubric reused across ~4 cheap Haiku calls).
+# The marker is kept because it's harmless and engages automatically if the
+# rubric ever grows past the threshold.
 RANKING_BATCH_SIZE = 40
 
 # Per batch of RANKING_BATCH_SIZE, output JSON is ~2-3K tokens. 16K is ample
@@ -139,8 +144,9 @@ def _score_batch(
     response = client.messages.parse(
         model=RANKING_MODEL,
         max_tokens=MAX_RANKING_TOKENS,
-        # List-of-blocks form so the rubric can carry cache_control: batches
-        # 2..N read it from cache instead of re-billing the full prompt.
+        # List-of-blocks form so the rubric can carry cache_control. Engages
+        # only once the cached prefix clears Haiku's minimum (see RANKING_BATCH_SIZE
+        # note); harmless and a no-op below that.
         system=[{"type": "text", "text": rubric, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": _format_articles(batch)}],
         output_format=RankingResponse,
