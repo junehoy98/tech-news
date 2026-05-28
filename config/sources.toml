@@ -1,0 +1,81 @@
+# Source feeds for the semiconductor capital equipment news digest.
+# Add new sources here without touching code. Each source needs:
+#   name      - human-readable label (shown in logs and the digest footer)
+#   url       - RSS/Atom feed URL
+#   category  - one of: company | tech | policy | business
+#   priority  - 1 (high) to 3 (low); tiebreaker when ranking
+#
+# Note on company press feeds: several key equipment makers (KLA, Onto, ASML)
+# don't publish stable RSS for their newsroom anymore. We get them
+# indirectly via trade press and HN keyword filters — V1.5 will add HTML
+# scrapers for the IR/press pages where it matters.
+
+# ---------------------------------------------------------------------------
+# Trade press — the workhorses; rich in tech detail
+# ---------------------------------------------------------------------------
+
+[[sources]]
+name = "SemiWiki"
+url = "https://semiwiki.com/feed/"
+category = "tech"
+priority = 1
+
+[[sources]]
+name = "Semiconductor Engineering"
+url = "https://semiengineering.com/feed/"
+category = "tech"
+priority = 1
+
+[[sources]]
+name = "EE Times"
+url = "https://www.eetimes.com/feed/"
+category = "tech"
+priority = 2
+
+[[sources]]
+name = "Bits & Chips"
+url = "https://bits-chips.com/feed/"
+category = "tech"
+priority = 1
+
+[[sources]]
+name = "Tom's Hardware"
+url = "https://www.tomshardware.com/feeds/all"
+category = "tech"
+priority = 3
+
+# ---------------------------------------------------------------------------
+# HN keyword filters — surprisingly high-signal for semi equipment news
+# hnrss.org is a free service that turns HN searches into RSS feeds.
+# The relevance ranker will filter out the noise.
+# ---------------------------------------------------------------------------
+
+[[sources]]
+name = "Hacker News (ASML query)"
+url = "https://hnrss.org/newest?q=ASML&points=5"
+category = "company"
+priority = 1
+
+[[sources]]
+name = "Hacker News (KLA/lithography/EUV)"
+url = "https://hnrss.org/newest?q=KLA+OR+lithography+OR+EUV&points=5"
+category = "tech"
+priority = 1
+
+[[sources]]
+name = "Hacker News (TSMC/Samsung/Intel fab)"
+url = "https://hnrss.org/newest?q=%28TSMC+OR+%22Samsung+foundry%22+OR+%22Intel+foundry%22%29+fab&points=10"
+category = "business"
+priority = 2
+
+[[sources]]
+name = "Hacker News (chip export controls)"
+url = "https://hnrss.org/newest?q=%22export+controls%22+%28chip+OR+semiconductor%29&points=5"
+category = "policy"
+priority = 1
+
+[[sources]]
+name = "Hacker News (CHIPS Act / Taiwan)"
+url = "https://hnrss.org/newest?q=%28%22CHIPS+Act%22+OR+%22Taiwan+chip%22+OR+%22semiconductor+policy%22%29&points=5"
+category = "policy"
+priority = 2
