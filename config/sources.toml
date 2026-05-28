@@ -2,7 +2,7 @@
 # Add new sources here without touching code. Each source needs:
 #   name      - human-readable label (shown in logs and the digest footer)
 #   url       - RSS/Atom feed URL
-#   category  - one of: company | tech | policy | business
+#   category  - one of: company | tech | policy | business | opinion
 #   priority  - 1 (high) to 3 (low); tiebreaker when ranking
 #
 # Note on company press feeds: several key equipment makers (KLA, Onto, ASML)
@@ -44,6 +44,50 @@ url = "https://www.tomshardware.com/feeds/all"
 category = "tech"
 priority = 3
 
+[[sources]]
+name = "Semiconductor Digest"
+url = "https://www.semiconductor-digest.com/feed/"
+category = "tech"
+priority = 2
+
+[[sources]]
+name = "EE Journal (Semiconductor)"
+url = "https://www.eejournal.com/category/semiconductor/feed/"
+category = "tech"
+priority = 2
+
+[[sources]]
+name = "AnySilicon"
+url = "https://anysilicon.com/feed/"
+category = "tech"
+priority = 3
+
+# Tech Xplore is a research-news aggregator — broad and noisy; the relevance
+# ranker does the culling. Low priority so it loses ties to focused sources.
+[[sources]]
+name = "Tech Xplore (Semiconductors)"
+url = "https://techxplore.com/rss-feed/semiconductors-news/"
+category = "tech"
+priority = 3
+
+# ---------------------------------------------------------------------------
+# Industry wire / Asia supply chain — fab capacity, tool orders, foundry moves
+# DIGITIMES is largely paywalled, but its RSS headlines are high-signal on
+# their own (the ranker scores on the headline when the body is gated).
+# ---------------------------------------------------------------------------
+
+[[sources]]
+name = "DIGITIMES"
+url = "https://www.digitimes.com/rss/daily.xml"
+category = "business"
+priority = 1
+
+[[sources]]
+name = "Evertiq"
+url = "https://feeds2.feedburner.com/EvertiqCom/All"
+category = "business"
+priority = 3
+
 # ---------------------------------------------------------------------------
 # HN keyword filters — surprisingly high-signal for semi equipment news
 # hnrss.org is a free service that turns HN searches into RSS feeds.
@@ -78,4 +122,35 @@ priority = 1
 name = "Hacker News (CHIPS Act / Taiwan)"
 url = "https://hnrss.org/newest?q=%28%22CHIPS+Act%22+OR+%22Taiwan+chip%22+OR+%22semiconductor+policy%22%29&points=5"
 category = "policy"
+priority = 2
+
+# ---------------------------------------------------------------------------
+# Opinion & analysis — independent commentary, not straight reporting.
+# Both Substacks publish FULL article text in RSS for free posts; paid /
+# subscriber-only posts arrive as a "Read more" stub (title-only to the
+# ranker). The ranker handles both — stubs just score on the headline.
+# ---------------------------------------------------------------------------
+
+[[sources]]
+name = "SemiAnalysis"
+url = "https://www.semianalysis.com/feed"
+category = "opinion"
+priority = 1
+
+[[sources]]
+name = "Fabricated Knowledge"
+url = "https://www.fabricatedknowledge.com/feed"
+category = "opinion"
+priority = 1
+
+[[sources]]
+name = "The Chip Letter"
+url = "https://thechipletter.substack.com/feed"
+category = "opinion"
+priority = 3
+
+[[sources]]
+name = "IEEE Spectrum (Semiconductors)"
+url = "https://spectrum.ieee.org/feeds/topic/semiconductors.rss"
+category = "opinion"
 priority = 2

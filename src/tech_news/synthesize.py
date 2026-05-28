@@ -75,7 +75,7 @@ class Brief(BaseModel):
     citations: list[Citation] = Field(
         description="The articles this brief draws on; at least one."
     )
-    category: str = Field(description="company | tech | policy | business")
+    category: str = Field(description="company | tech | policy | business | opinion")
 
 
 class SynthesisResponse(BaseModel):
@@ -183,7 +183,7 @@ def _format_candidates(candidates: list[RankedArticle], target_briefs: int) -> s
         "items on export-control policy) may also be combined into one brief.",
         "",
         "Selection: not every article needs to appear. Drop weak or redundant ones. "
-        "Aim for breadth across categories (company / tech / policy / business) "
+        "Aim for breadth across categories (company / tech / policy / business / opinion) "
         "when the news supports it.",
         "",
         "Each brief: a single 60-100 word paragraph in plain American English, "

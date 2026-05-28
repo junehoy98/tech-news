@@ -29,7 +29,7 @@ RANKING_MODEL = "claude-haiku-4-5"
 MAX_RANKING_TOKENS = 16000
 
 
-Category = Literal["company", "tech", "policy", "business"]
+Category = Literal["company", "tech", "policy", "business", "opinion"]
 
 
 class ItemScore(BaseModel):
