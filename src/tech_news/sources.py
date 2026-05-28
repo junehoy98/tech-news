@@ -6,7 +6,7 @@ import hashlib
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import feedparser
@@ -24,6 +24,12 @@ log = logging.getLogger(__name__)
 
 USER_AGENT = "tech-news-digest/0.1 (+https://github.com/junehoy98/tech-news)"
 FETCH_TIMEOUT = 20.0
+
+# Default recency window applied before ranking. The ranker scores every new
+# article in a single LLM call, so unbounded input is both a cost and a
+# correctness risk (it can overflow the output cap). A week covers weekend
+# gaps and the GitHub scheduler's lag while keeping the batch small.
+DEFAULT_MAX_AGE_DAYS = 7
 
 
 @dataclass(frozen=True)
@@ -106,6 +112,26 @@ def fetch_all(sources: list[Source]) -> list[Article]:
             log.info("Fetched %d items from %s", len(new), src.name)
             articles.extend(new)
     return articles
+
+
+def filter_recent(
+    articles: list[Article],
+    max_age_days: int = DEFAULT_MAX_AGE_DAYS,
+    now: datetime | None = None,
+) -> list[Article]:
+    """Drop articles older than `max_age_days` by published date.
+
+    Bounds the ranking batch: without this, a feed that publishes a long
+    archive (or the first run against an empty dedupe DB) would push hundreds
+    of stale items into the single-shot ranker. Pass max_age_days <= 0 to
+    disable. Items with no parseable date default to `now` in _parse_date, so
+    they're never dropped here.
+    """
+    if max_age_days <= 0:
+        return articles
+    now = now or datetime.now(UTC)
+    cutoff = now - timedelta(days=max_age_days)
+    return [a for a in articles if a.published >= cutoff]
 
 
 def _parse_date(entry: feedparser.FeedParserDict) -> datetime:

@@ -65,6 +65,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Project root (auto-detected; rarely needed)",
     )
     parser.add_argument(
+        "--max-age-days",
+        type=int,
+        default=sources.DEFAULT_MAX_AGE_DAYS,
+        help=(
+            "Drop articles older than this many days before ranking, so a long "
+            "archive feed or a fresh dedupe DB can't flood the single-shot ranker "
+            f"(default {sources.DEFAULT_MAX_AGE_DAYS}; 0 disables)."
+        ),
+    )
+    parser.add_argument(
         "--target-briefs",
         type=int,
         default=synthesize.DEFAULT_TARGET_BRIEFS,
@@ -128,6 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Fetching feeds...")
     all_articles = sources.fetch_all(src_list)
     log.info("Fetched %d total articles", len(all_articles))
+
+    recent = sources.filter_recent(all_articles, max_age_days=args.max_age_days)
+    if len(recent) != len(all_articles):
+        log.info(
+            "%d articles within the last %d days (%d older ones dropped)",
+            len(recent), args.max_age_days, len(all_articles) - len(recent),
+        )
+    all_articles = recent
 
     db.prune()
     new_articles = db.filter_new(all_articles)

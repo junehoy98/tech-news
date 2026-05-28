@@ -14,12 +14,13 @@ def make_article(
     source_name: str = "TestSource",
     category: str = "tech",
     priority: int = 1,
+    published: datetime | None = None,
 ) -> Article:
     return Article(
         url=url,
         title=title,
         summary=summary,
-        published=datetime(2026, 5, 26, tzinfo=UTC),
+        published=published or datetime(2026, 5, 26, tzinfo=UTC),
         source_name=source_name,
         category=category,
         priority=priority,
