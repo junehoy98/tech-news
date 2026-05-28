@@ -24,8 +24,17 @@ log = logging.getLogger(__name__)
 # Haiku 4.5: fast and cheap; the scoring rubric doesn't need a frontier model.
 RANKING_MODEL = "claude-haiku-4-5"
 
-# Each ItemScore serializes to ~130-150 chars; at 200+ articles output JSON
-# can run 8K+ tokens. Give Haiku plenty of headroom.
+# Articles are scored in batches rather than one giant call. A single
+# "return EXACTLY N entries" request gets unreliable as N grows — the model
+# truncates (overflowing max_tokens → no parsed output → empty digest) or
+# silently drops fingerprints. Smaller batches keep each call well within the
+# output cap and localize any failure to one batch. The rubric is sent as a
+# cached system prompt, so batches 2..N read it from cache instead of
+# re-billing the full rubric each time.
+RANKING_BATCH_SIZE = 40
+
+# Per batch of RANKING_BATCH_SIZE, output JSON is ~2-3K tokens. 16K is ample
+# headroom so a verbose batch can't truncate.
 MAX_RANKING_TOKENS = 16000
 
 
@@ -63,46 +72,104 @@ def rank_articles(
     criteria_path: Path,
     client: anthropic.Anthropic | None = None,
 ) -> list[RankedArticle]:
-    """Score every article; return them sorted by score desc."""
+    """Score every article in batches; return them sorted by score desc.
+
+    A failed batch (no parsed output) is logged and skipped rather than
+    sinking the whole run. Any article the model omits from a batch is kept
+    with a default score of 0 so it's counted, not silently lost.
+    """
     if not articles:
         return []
 
     client = client or anthropic.Anthropic()
     rubric = criteria_path.read_text(encoding="utf-8")
-
-    user_message = _format_articles(articles)
-
-    response = client.messages.parse(
-        model=RANKING_MODEL,
-        max_tokens=MAX_RANKING_TOKENS,
-        system=rubric,
-        messages=[{"role": "user", "content": user_message}],
-        output_format=RankingResponse,
-    )
-
-    parsed = response.parsed_output
-    if parsed is None:
-        log.error("Haiku ranking returned no parsed output; stop_reason=%s", response.stop_reason)
-        return []
-
     by_fp = {a.fingerprint: a for a in articles}
+
+    batches = [
+        articles[i : i + RANKING_BATCH_SIZE]
+        for i in range(0, len(articles), RANKING_BATCH_SIZE)
+    ]
     ranked: list[RankedArticle] = []
-    for item in parsed.items:
-        article = by_fp.get(item.fingerprint)
-        if article is None:
-            log.warning("Haiku returned unknown fingerprint %s; skipping", item.fingerprint)
-            continue
-        ranked.append(
-            RankedArticle(
-                article=article,
-                score=item.score,
-                category=item.category,
-                topic_tag=item.topic_tag,
+    for n, batch in enumerate(batches, start=1):
+        items = _score_batch(batch, rubric, client, n, len(batches))
+
+        scored_fps: set[str] = set()
+        for item in items:
+            article = by_fp.get(item.fingerprint)
+            if article is None:
+                log.warning("Haiku returned unknown fingerprint %s; skipping", item.fingerprint)
+                continue
+            scored_fps.add(item.fingerprint)
+            ranked.append(
+                RankedArticle(
+                    article=article,
+                    score=item.score,
+                    category=item.category,
+                    topic_tag=item.topic_tag,
+                )
             )
-        )
+
+        for article in batch:
+            if article.fingerprint not in scored_fps:
+                log.warning(
+                    "Haiku omitted %s (%r); defaulting to score 0",
+                    article.fingerprint, article.title[:60],
+                )
+                ranked.append(
+                    RankedArticle(
+                        article=article,
+                        score=0,
+                        category=article.category,
+                        topic_tag="",
+                    )
+                )
 
     ranked.sort(key=lambda r: (-r.score, r.article.priority))
     return ranked
+
+
+def _score_batch(
+    batch: list[Article],
+    rubric: str,
+    client: anthropic.Anthropic,
+    idx: int,
+    total: int,
+) -> list[ItemScore]:
+    """Score one batch. Returns [] (logged) on a failed/empty parse."""
+    response = client.messages.parse(
+        model=RANKING_MODEL,
+        max_tokens=MAX_RANKING_TOKENS,
+        # List-of-blocks form so the rubric can carry cache_control: batches
+        # 2..N read it from cache instead of re-billing the full prompt.
+        system=[{"type": "text", "text": rubric, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": _format_articles(batch)}],
+        output_format=RankingResponse,
+    )
+    _log_usage(response, idx, total)
+
+    parsed = response.parsed_output
+    if parsed is None:
+        log.error(
+            "Haiku ranking batch %d/%d returned no parsed output; stop_reason=%s",
+            idx, total, response.stop_reason,
+        )
+        return []
+    return parsed.items
+
+
+def _log_usage(response: object, idx: int, total: int) -> None:
+    """Log token usage, including cache hits, so cost and caching are visible."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    log.info(
+        "Rank batch %d/%d tokens: in=%s out=%s cache_write=%s cache_read=%s",
+        idx, total,
+        getattr(usage, "input_tokens", "?"),
+        getattr(usage, "output_tokens", "?"),
+        getattr(usage, "cache_creation_input_tokens", 0),
+        getattr(usage, "cache_read_input_tokens", 0),
+    )
 
 
 def _format_articles(articles: list[Article]) -> str:
