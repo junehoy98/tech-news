@@ -63,6 +63,10 @@ def test_template_renders_briefs_with_multiple_citations():
     # Intro renders when present
     assert "Two storylines dominate" in html
 
+    # Category tag renders beside each headline (uppercased via CSS)
+    assert '<span class="cat">tech</span>' in html
+    assert '<span class="cat">policy</span>' in html
+
 
 def test_template_omits_intro_when_empty():
     digest = Digest(
