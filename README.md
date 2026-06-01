@@ -86,6 +86,14 @@ automatically every morning without your laptop needing to be on.
    ~9 AM ET to send, so the delivery time stays fixed regardless of scheduler
    lag. See the comments in `.github/workflows/daily.yml` for the details.
 
+### Punctual delivery (optional): external trigger
+
+GitHub's scheduled-cron queue can lag by hours, so even with the early start the
+send can slip past 9 AM. For on-time delivery, a small **Cloudflare Worker**
+fires the workflow via `workflow_dispatch` on a reliable cron — GitHub allocates
+a dispatch runner almost immediately. The built-in `schedule:` crons stay as a
+fallback. Setup steps are in [`trigger/README.md`](trigger/README.md).
+
 ---
 
 ## Tuning the digest

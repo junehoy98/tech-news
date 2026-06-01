@@ -1,0 +1,18 @@
+name = "tech-news-trigger"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# 12:30 UTC, Mon–Fri = 08:30 ET (summer, EDT) / 07:30 ET (winter, EST) — safely
+# before the 08:58 ET send in both seasons. The digest job's --send-at gate pins
+# the exact delivery time, so this fixed-UTC cron needs no DST handling of its
+# own; it just has to start the runner with margin to spare.
+[triggers]
+crons = ["30 12 * * 1-5"]
+
+# Non-secret config consumed by worker.js. The PAT is NOT here — it's set as an
+# encrypted secret via `wrangler secret put GH_DISPATCH_TOKEN`.
+[vars]
+GH_OWNER = "junehoy98"
+GH_REPO = "tech-news"
+GH_WORKFLOW = "daily.yml"
+GH_REF = "main"

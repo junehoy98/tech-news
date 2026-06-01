@@ -1,0 +1,5 @@
+# Wrangler's local state/cache (account id, build artifacts) — never commit.
+.wrangler/
+
+# Stray editor copies
+*- Copy.toml
