@@ -16,8 +16,8 @@ This rubric is read by **two LLM passes**:
 1. **Scoring pass** (Haiku): scores every fetched article 0–10, picks a
    category, and assigns a short `topic_tag` for clustering.
 2. **Synthesis pass** (Sonnet): takes the top-scored articles and writes
-   the actual digest — 4–6 short paragraphs ("briefs"), each clustering
-   articles on the same news event.
+   the actual digest — one longer **lead brief** plus 6–8 short paragraphs
+   ("briefs"), each clustering articles on the same news event.
 
 Both passes share this rubric. Pass-specific instructions are in the
 per-pass user message.
@@ -40,9 +40,34 @@ Specifically avoid:
 Write the way a competent industry analyst at a US firm would write a
 weekly internal memo. Direct, factual, useful.
 
-**Length:** each brief is a single paragraph of **60–100 words**. The whole
-digest should read in 2–3 minutes total. The reader will stop opening it
-if it's longer.
+**Length:** each regular brief is a single paragraph of **60–100 words**.
+The whole digest should read in a few minutes total. The reader will stop
+opening it if it's longer.
+
+**The lead brief (the day's most important story) runs longer — 120–180
+words.** Pick the single most consequential story and give it the extra
+length. The extra words go to the **technical read a physics/optics reader
+wants**, not to more adjectives or recap:
+
+- When the story touches **optics, metrology, or lithography**, explain what
+  the optical or metrology change actually *is*, in concrete physical terms:
+  numerical aperture and the resolution it buys, the wavelength, illumination
+  or pupil shaping, overlay/alignment error budgets in nanometers, the sensor
+  or interferometer principle, resist or mask physics. State the number and
+  the mechanism, not just that something "improved."
+- When the lead has **no optics/metrology/lithography angle**, still run long,
+  but spend the words on the real technical or business mechanics of the story
+  (the supply chain, the capex math, the policy instrument). Never pad to hit
+  the length.
+
+The lead keeps the **same voice and the same bolding discipline** as every
+other brief: plain American English, no British/Economist tics, and exactly
+two bolds (first entity mention + one punchline) — being longer is not a
+license to bold more. Define industry jargon in the same tight 3–7 word
+parentheticals; the reader knows physics, not industry shorthand. And the
+**no "why this matters" / study-guide tail** rule applies to the lead too —
+the depth lives in *explaining the physics of the news*, never in a tacked-on
+"expect questions about…" coda.
 
 **Bold — two complementary uses, applied in this order:**
 
@@ -110,7 +135,8 @@ matching tags signal the same event.
 
 Beyond exact-tag matches, also cluster articles with a clear thematic link
 (e.g. three policy items all about export controls, two earnings reports
-from related companies). Aim for 4–6 briefs total, not 12 items.
+from related companies). Aim for one lead brief plus 6–8 regular briefs, not
+20 loose items.
 
 Example clustering decision:
 - Three articles on "ASML High-NA shipment" → ONE brief citing all three

@@ -76,6 +76,25 @@
     line-height: 1.3;
     color: #1a1a1a;
   }
+  /* Lead brief — the day's most important story, run longer and a touch
+     more prominent while staying within the serif house style. */
+  article.brief.lead {
+    border-left: 3px solid #c1322d;
+    padding-left: 16px;
+    margin-bottom: 8px;
+  }
+  article.brief.lead h3 {
+    font-size: 23px;
+    line-height: 1.25;
+  }
+  article.brief.lead .paragraph {
+    font-size: 18px;
+  }
+  hr.lead-sep {
+    border: 0;
+    border-top: 2px solid #c1322d;
+    margin: 24px 0;
+  }
   article.brief .cat {
     float: right;
     margin: 4px 0 0 12px;
@@ -142,9 +161,8 @@
   <div class="intro"><p>{{ digest.intro | bold_md | safe }}</p></div>
   {% endif %}
 
-  {% for brief in digest.briefs %}
-  {% if not loop.first %}<hr class="sep">{% endif %}
-  <article class="brief">
+  {% macro render_brief(brief, lead=False) %}
+  <article class="brief{% if lead %} lead{% endif %}">
     {% if brief.category %}<span class="cat">{{ brief.category }}</span>{% endif %}
     <h3>{{ brief.headline }}</h3>
     <p class="paragraph">{{ brief.paragraph | bold_md | safe }}</p>
@@ -154,10 +172,21 @@
       {%- endfor %}
     </p>
   </article>
+  {% endmacro %}
+
+  {% if digest.lead_brief %}
+  {{ render_brief(digest.lead_brief, lead=True) }}
+  {% if digest.briefs %}<hr class="lead-sep">{% endif %}
+  {% endif %}
+
+  {% for brief in digest.briefs %}
+  {% if not loop.first %}<hr class="sep">{% endif %}
+  {{ render_brief(brief) }}
   {% endfor %}
 
   <div class="footer">
-    {{ digest.briefs | length }} briefs from {{ digest.total_kept }} scored articles
+    {{ digest.briefs | length + (1 if digest.lead_brief else 0) }} briefs from
+    {{ digest.total_kept }} scored articles
     ({{ digest.total_fetched }} fetched) &middot;
     Tune at <code>config/sources.toml</code> and <code>config/criteria.md</code>
   </div>

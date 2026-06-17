@@ -2,7 +2,7 @@ from datetime import date
 from pathlib import Path
 
 from tech_news.mailer import render_html
-from tech_news.synthesize import Brief, Citation, Digest
+from tech_news.synthesize import Brief, Citation, Digest, LeadBrief
 
 
 def test_template_renders_briefs_with_multiple_citations():
@@ -38,6 +38,7 @@ def test_template_renders_briefs_with_multiple_citations():
         date=date(2026, 5, 26),
         email_subject="ASML High-NA ready; Dutch push back on US export rules",
         intro="Two storylines dominate this morning: tool maturity and policy friction.",
+        lead_brief=None,
         briefs=briefs,
         total_kept=14,
         total_fetched=180,
@@ -68,11 +69,57 @@ def test_template_renders_briefs_with_multiple_citations():
     assert '<span class="cat">policy</span>' in html
 
 
+def test_template_renders_lead_brief_prominently_first():
+    lead = LeadBrief(
+        headline="ASML ships its first High-NA EUV scanner",
+        paragraph=(
+            "**ASML** shipped its first High-NA EUV (next-gen extreme-ultraviolet) "
+            "scanner, lifting numerical aperture from 0.33 to **0.55** — the change "
+            "that shrinks the printable half-pitch from 13 nm toward 8 nm at the same "
+            "13.5 nm wavelength. The larger pupil collects steeper diffraction orders, "
+            "so finer features resolve in a single exposure, but it also halves the "
+            "field and demands anamorphic optics and tighter overlay (layer-to-layer "
+            "alignment) budgets in the low nanometers."
+        ),
+        citations=[Citation(source="SemiWiki", url="https://example.com/lead/asml")],
+        category="tech",
+    )
+    regular = Brief(
+        headline="KLA updates its overlay metrology suite",
+        paragraph="**KLA** refreshed its overlay (layer-to-layer alignment) tools.",
+        citations=[Citation(source="KLA", url="https://example.com/kla")],
+        category="company",
+    )
+    digest = Digest(
+        date=date(2026, 5, 26),
+        email_subject="ASML ships High-NA",
+        intro="",
+        lead_brief=lead,
+        briefs=[regular],
+        total_kept=5,
+        total_fetched=50,
+    )
+
+    templates_dir = Path(__file__).resolve().parents[1] / "src" / "tech_news" / "templates"
+    html = render_html(digest, templates_dir)
+
+    # Lead brief renders with the prominent lead class and its deeper paragraph.
+    assert 'class="brief lead"' in html
+    assert "numerical aperture from 0.33" in html
+
+    # The lead appears before the regular brief in the document.
+    assert html.index("first High-NA EUV scanner") < html.index("overlay metrology suite")
+
+    # Footer counts the lead plus the regular brief.
+    assert "2 briefs from" in html
+
+
 def test_template_omits_intro_when_empty():
     digest = Digest(
         date=date(2026, 5, 26),
         email_subject="ASML High-NA ready",
         intro="",
+        lead_brief=None,
         briefs=[
             Brief(
                 headline="x",
@@ -105,6 +152,7 @@ def test_digest_date_helpers_are_cross_platform():
         date=date(2026, 1, 5),
         email_subject="x",
         intro="",
+        lead_brief=None,
         briefs=[],
         total_kept=0,
         total_fetched=0,

@@ -1,0 +1,31 @@
+<!--
+  Saved snippet of KLA's newsroom listing (https://www.kla.com/newsroom),
+  captured June 2026 with a browser-like User-Agent. KLA server-renders the
+  latest IR press releases as .news-detail blocks on this page.
+
+  This fixture exists alongside scrape_asml.html to exercise a DIFFERENT date
+  shape: KLA stamps a machine-readable <time datetime="..."> that the adapter
+  prefers over the human label. The selectors mirror config/sources.toml's
+  "KLA (newsroom)" source:
+      item  = div.news-detail
+      title = a
+      link  = a
+      date  = time   (datetime attr wins over the "May 13, 2026" text)
+
+  Brittle by nature — if KLA re-skins the newsroom, re-derive these selectors in
+  config/sources.toml, not here.
+-->
+<html>
+  <body>
+    <div class="press-releases inner no-padding">
+      <div class="news-detail" data-fetched="1781649489">
+        <p class="h5"><time datetime="2026-05-13T20:00:00+00:00">May 13, 2026</time></p>
+        <a href="https://ir.kla.com/news-events/press-releases/detail/516/kla-announces-upcoming-investor-webcasts" rel="noopener noreferrer" target="_blank">KLA Announces Upcoming Investor Webcasts</a>
+      </div>
+      <div class="news-detail" data-fetched="1781649489">
+        <p class="h5"><time datetime="2026-05-07T20:15:00+00:00">May 7, 2026</time></p>
+        <a href="https://ir.kla.com/news-events/press-releases/detail/515/kla-corporation-announces-ten-to-one-stock-split-and" rel="noopener noreferrer" target="_blank">KLA Corporation Announces Ten-to-One Stock Split and Quarterly Cash Dividend Payment</a>
+      </div>
+    </div>
+  </body>
+</html>

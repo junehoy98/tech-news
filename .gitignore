@@ -33,5 +33,8 @@ out/
 *.swo
 .DS_Store
 
+# Playwright MCP scratch captures (one-off page snapshots from deriving selectors)
+.playwright-mcp/
+
 # Local reference materials (copyrighted PDFs, sample emails, etc.)
 *.pdf

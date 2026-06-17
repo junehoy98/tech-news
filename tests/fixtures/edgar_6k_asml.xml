@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+  <feed xmlns="http://www.w3.org/2005/Atom">
+    <author>
+      <email>webmaster@sec.gov</email>
+      <name>Webmaster</name>
+    </author>
+    <company-info>
+      <cik>0000937966</cik>
+      <conformed-name>ASML HOLDING NV</conformed-name>
+      <assigned-sic>3559</assigned-sic>
+      <assigned-sic-desc>SPECIAL INDUSTRY MACHINERY, NEC</assigned-sic-desc>
+    </company-info>
+    <entry>
+      <category label="form type" scheme="https://www.sec.gov/" term="6-K" />
+      <content type="text/xml">
+        <accession-number>0001628280-26-026703</accession-number>
+        <filing-date>2026-04-23</filing-date>
+        <filing-href>https://www.sec.gov/Archives/edgar/data/937966/000162828026026703/0001628280-26-026703-index.htm</filing-href>
+        <filing-type>6-K</filing-type>
+        <form-name>Report of foreign issuer [Rules 13a-16 and 15d-16]</form-name>
+        <size>35 KB</size>
+      </content>
+      <id>urn:tag:sec.gov,2008:accession-number=0001628280-26-026703</id>
+      <link href="https://www.sec.gov/Archives/edgar/data/937966/000162828026026703/0001628280-26-026703-index.htm" rel="alternate" type="text/html" />
+      <summary type="html"> &lt;b&gt;Filed:&lt;/b&gt; 2026-04-23 &lt;b&gt;AccNo:&lt;/b&gt; 0001628280-26-026703 &lt;b&gt;Size:&lt;/b&gt; 35 KB</summary>
+      <title>6-K  - Report of foreign issuer [Rules 13a-16 and 15d-16]</title>
+      <updated>2026-04-23T08:47:08-04:00</updated>
+    </entry>
+    <entry>
+      <category label="form type" scheme="https://www.sec.gov/" term="6-K" />
+      <content type="text/xml">
+        <accession-number>0001628280-26-016671</accession-number>
+        <filing-date>2026-03-11</filing-date>
+        <filing-href>https://www.sec.gov/Archives/edgar/data/937966/000162828026016671/0001628280-26-016671-index.htm</filing-href>
+        <filing-type>6-K</filing-type>
+        <form-name>Report of foreign issuer [Rules 13a-16 and 15d-16]</form-name>
+        <size>5 MB</size>
+      </content>
+      <id>urn:tag:sec.gov,2008:accession-number=0001628280-26-016671</id>
+      <link href="https://www.sec.gov/Archives/edgar/data/937966/000162828026016671/0001628280-26-016671-index.htm" rel="alternate" type="text/html" />
+      <summary type="html"> &lt;b&gt;Filed:&lt;/b&gt; 2026-03-11 &lt;b&gt;AccNo:&lt;/b&gt; 0001628280-26-016671 &lt;b&gt;Size:&lt;/b&gt; 5 MB</summary>
+      <title>6-K  - Report of foreign issuer [Rules 13a-16 and 15d-16]</title>
+      <updated>2026-03-11T09:00:00-04:00</updated>
+    </entry>
+    <id>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0000937966</id>
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=ASML&amp;type=6-K&amp;start=0&amp;count=10" rel="alternate" type="text/html" />
+    <title>ASML HOLDING NV  (0000937966)</title>
+    <updated>2026-06-16T18:19:26-04:00</updated>
+  </feed>

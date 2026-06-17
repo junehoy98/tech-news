@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+  <feed xmlns="http://www.w3.org/2005/Atom">
+    <author>
+      <email>webmaster@sec.gov</email>
+      <name>Webmaster</name>
+    </author>
+    <company-info>
+      <cik>0000319201</cik>
+      <conformed-name>KLA CORP</conformed-name>
+      <assigned-sic>3827</assigned-sic>
+      <assigned-sic-desc>OPTICAL INSTRUMENTS &amp;amp; LENSES</assigned-sic-desc>
+      <state-of-incorporation>DE</state-of-incorporation>
+    </company-info>
+    <entry>
+      <category label="form type" scheme="https://www.sec.gov/" term="8-K" />
+      <content type="text/xml">
+        <accession-number>0001193125-26-269375</accession-number>
+        <filing-date>2026-06-12</filing-date>
+        <filing-href>https://www.sec.gov/Archives/edgar/data/319201/000119312526269375/0001193125-26-269375-index.htm</filing-href>
+        <filing-type>8-K</filing-type>
+        <form-name>Current report</form-name>
+        <items-desc>items 5.03 and 9.01</items-desc>
+        <size>199 KB</size>
+      </content>
+      <id>urn:tag:sec.gov,2008:accession-number=0001193125-26-269375</id>
+      <link href="https://www.sec.gov/Archives/edgar/data/319201/000119312526269375/0001193125-26-269375-index.htm" rel="alternate" type="text/html" />
+      <summary type="html"> &lt;b&gt;Filed:&lt;/b&gt; 2026-06-12 &lt;b&gt;AccNo:&lt;/b&gt; 0001193125-26-269375 &lt;b&gt;Size:&lt;/b&gt; 199 KB&lt;br&gt;Item 5.03: Amendments to Articles of Incorporation or Bylaws; Change in Fiscal Year&lt;br&gt;Item 9.01: Financial Statements and Exhibits</summary>
+      <title>8-K  - Current report</title>
+      <updated>2026-06-12T16:05:07-04:00</updated>
+    </entry>
+    <entry>
+      <category label="form type" scheme="https://www.sec.gov/" term="8-K" />
+      <content type="text/xml">
+        <accession-number>0000319201-26-000014</accession-number>
+        <filing-date>2026-04-29</filing-date>
+        <filing-href>https://www.sec.gov/Archives/edgar/data/319201/000031920126000014/0000319201-26-000014-index.htm</filing-href>
+        <filing-type>8-K</filing-type>
+        <form-name>Current report</form-name>
+        <items-desc>items 2.02 and 9.01</items-desc>
+        <size>468 KB</size>
+      </content>
+      <id>urn:tag:sec.gov,2008:accession-number=0000319201-26-000014</id>
+      <link href="https://www.sec.gov/Archives/edgar/data/319201/000031920126000014/0000319201-26-000014-index.htm" rel="alternate" type="text/html" />
+      <summary type="html"> &lt;b&gt;Filed:&lt;/b&gt; 2026-04-29 &lt;b&gt;AccNo:&lt;/b&gt; 0000319201-26-000014 &lt;b&gt;Size:&lt;/b&gt; 468 KB&lt;br&gt;Item 2.02: Results of Operations and Financial Condition&lt;br&gt;Item 9.01: Financial Statements and Exhibits</summary>
+      <title>8-K  - Current report</title>
+      <updated>2026-04-29T16:06:15-04:00</updated>
+    </entry>
+    <id>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0000319201</id>
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=KLAC&amp;type=8-K&amp;start=0&amp;count=10" rel="alternate" type="text/html" />
+    <title>KLA CORP  (0000319201)</title>
+    <updated>2026-06-16T18:19:25-04:00</updated>
+  </feed>

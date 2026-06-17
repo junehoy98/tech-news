@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from . import mailer, rank, sources, store, synthesize
+from . import archive, fulltext, mailer, rank, sources, store, synthesize
 
 log = logging.getLogger("tech_news")
 
@@ -79,6 +79,14 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=synthesize.DEFAULT_TARGET_BRIEFS,
         help=f"Target number of clustered briefs (default {synthesize.DEFAULT_TARGET_BRIEFS})",
+    )
+    parser.add_argument(
+        "--no-fulltext",
+        action="store_true",
+        help=(
+            "Skip fetching article bodies; rank and synthesize from the RSS "
+            "teaser only. Faster and network-light, but lower-quality briefs."
+        ),
     )
     parser.add_argument(
         "--send-at",
@@ -159,6 +167,13 @@ def main(argv: list[str] | None = None) -> int:
         log.info("To re-process everything (e.g. for testing), rerun with --reset-seen.")
         return 0
 
+    if args.no_fulltext:
+        log.info("Skipping full-text fetch (--no-fulltext); using RSS teasers only.")
+    else:
+        log.info("Fetching article bodies for %d new articles...", len(new_articles))
+        fetched = fulltext.enrich(new_articles)
+        log.info("Full text: read %d/%d bodies", fetched, len(new_articles))
+
     log.info("Scoring %d articles with Haiku...", len(new_articles))
     ranked = rank.rank_articles(new_articles, criteria_path)
     log.info("Got %d scored articles back", len(ranked))
@@ -169,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         criteria_path=criteria_path,
         total_fetched=len(new_articles),
         target_briefs=args.target_briefs,
+        archive_path=root / "data" / "digest_archive.jsonl",
     )
     log.info("Digest: %d briefs from %d candidates", len(digest.briefs), digest.total_kept)
     log.info("Email subject would be: %r", f"{digest.email_subject} — {digest.date_short}")
@@ -225,6 +241,11 @@ def main(argv: list[str] | None = None) -> int:
     db.mark_seen(new_articles)
     if send_day is not None:
         db.mark_sent(send_day)
+    # Persist what actually went out — the durable record for future storyline
+    # threading. Only on a real send (never --dry-run, never a "nothing new"
+    # bail), and best-effort: archive.append_digest logs and swallows failures
+    # so a write error can't undo a successful send.
+    archive.append_digest(digest, ranked, root / "data" / "digest_archive.jsonl")
     log.info("Done.")
     return 0
 

@@ -42,6 +42,12 @@ RANKING_BATCH_SIZE = 40
 # headroom so a verbose batch can't truncate.
 MAX_RANKING_TOKENS = 16000
 
+# Per-article body budget in the scoring prompt. The full body can run to
+# MAX_BODY_CHARS (~4000), but scoring needs only the lede; a tight cap keeps a
+# 40-article batch's input bounded. The synthesizer (fewer candidates) gets a
+# longer slice.
+RANK_BODY_CHARS = 700
+
 
 Category = Literal["company", "tech", "policy", "business", "opinion"]
 
@@ -200,7 +206,11 @@ def _format_articles(articles: list[Article]) -> str:
         lines.append(f"fingerprint: {a.fingerprint}")
         lines.append(f"source: {a.source_name} (suggested category: {a.category})")
         lines.append(f"title: {a.title}")
-        if a.summary:
+        # Prefer the fetched article body over the RSS teaser; fall back to the
+        # summary when full-text reading found nothing (paywall, PDF, disabled).
+        if a.body:
+            lines.append(f"body: {a.body[:RANK_BODY_CHARS]}")
+        elif a.summary:
             lines.append(f"summary: {a.summary}")
         lines.append("")
     lines.append("=== articles end ===")

@@ -1,0 +1,47 @@
+<!--
+  Saved snippet of ASML's press-releases listing page, captured June 2026 with a
+  browser-like User-Agent (https://www.asml.com/en/news/press-releases).
+
+  Kept deliberately small: just the press-release cards the scrape adapter
+  targets, so the offline test never hits the network. The selectors exercised
+  here mirror config/sources.toml's "ASML (press releases)" source:
+      item  = a.related-content-card--story
+      title = .related-content-card-title
+      link  = ""  (the item <a> itself carries the href)
+      date  = .related-content-card-subtitle
+
+  The third card uses a RELATIVE href on purpose, to verify the adapter resolves
+  it against base_url. The trailing card has NO href, to verify a malformed item
+  is skipped (not fatal). If this markup ever stops matching the live page, the
+  fix is in config/sources.toml, not here.
+-->
+<html>
+  <body>
+    <section class="press-release-list">
+      <a class="related-content-card related-content-card--story" href="https://www.asml.com/en/news/press-releases/2026/tata-electronics-and-asml-announce-strategic-partnership">
+        <div class="related-content-card-body">
+          <span class="related-content-card-subtitle">May 16, 2026<!-- --></span>
+          <span class="related-content-card-title">Tata Electronics and ASML Announce Strategic Partnership to Advance the Semiconductor Manufacturing Ecosystem in India</span>
+        </div>
+      </a>
+      <a class="related-content-card related-content-card--story" href="https://www.asml.com/en/news/press-releases/2026/asml-ceo-christophe-fouquet-co-signed-opinion-piece">
+        <div class="related-content-card-body">
+          <span class="related-content-card-subtitle">May 5, 2026<!-- --></span>
+          <span class="related-content-card-title">ASML CEO Christophe Fouquet co-signed opinion piece with European technology companies</span>
+        </div>
+      </a>
+      <a class="related-content-card related-content-card--story" href="/en/news/press-releases/2026/asml-discloses-2026-agm-results">
+        <div class="related-content-card-body">
+          <span class="related-content-card-subtitle">April 22, 2026<!-- --></span>
+          <span class="related-content-card-title">ASML discloses 2026 AGM results</span>
+        </div>
+      </a>
+      <a class="related-content-card related-content-card--story">
+        <div class="related-content-card-body">
+          <span class="related-content-card-subtitle">April 1, 2026<!-- --></span>
+          <span class="related-content-card-title">Malformed card with no href (should be skipped)</span>
+        </div>
+      </a>
+    </section>
+  </body>
+</html>

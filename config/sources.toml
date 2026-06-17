@@ -6,9 +6,10 @@
 #   priority  - 1 (high) to 3 (low); tiebreaker when ranking
 #
 # Note on company press feeds: several key equipment makers (KLA, Onto, ASML)
-# don't publish stable RSS for their newsroom anymore. We get them
-# indirectly via trade press and HN keyword filters — V1.5 will add HTML
-# scrapers for the IR/press pages where it matters.
+# and SEMI.org don't publish stable RSS for their newsroom anymore. We pull
+# those directly with the HTML-scrape adapter (kind = "scrape"); see the
+# "Company newsrooms" section at the bottom of this file. We still also catch
+# them indirectly via trade press and HN keyword filters.
 
 # ---------------------------------------------------------------------------
 # Trade press — the workhorses; rich in tech detail
@@ -154,3 +155,118 @@ name = "IEEE Spectrum (Semiconductors)"
 url = "https://spectrum.ieee.org/feeds/topic/semiconductors.rss"
 category = "opinion"
 priority = 2
+
+# ---------------------------------------------------------------------------
+# Primary filings & regulatory sources — straight from the issuer/agency, so
+# these are the earliest, most authoritative signal on a maker's results or a
+# new export rule. They route through non-RSS adapters in adapters.py:
+#
+#   kind = "edgar"            -> adapters.fetch_edgar
+#   kind = "federal_register" -> adapters.fetch_federal_register
+#
+# Each carries adapter-specific `options` (a filer list / agency slugs). The
+# adapters degrade to [] on any HTTP/parse error, so a bad ticker or a flaky
+# API never sinks the run — same contract as the RSS path.
+# ---------------------------------------------------------------------------
+
+# SEC EDGAR — material-event filings for the equipment makers we track. SEC
+# requires a contact User-Agent (a generic one 403s), so we pass one here.
+# `options.filings` lists one {ticker, form} per filer: US issuers file 8-K
+# (current report) and the ADR-listed foreign issuer (ASML) files 6-K
+# (report of foreign issuer). `options.count` caps each filer's feed;
+# filter_recent trims by date downstream.
+[[sources]]
+name = "SEC EDGAR (equipment makers)"
+url = "https://www.sec.gov/cgi-bin/browse-edgar"
+category = "company"
+priority = 1
+kind = "edgar"
+user_agent = "tech-news-digest (junehoy98@gmail.com)"
+options = { count = 10, filings = [
+    { ticker = "KLAC", form = "8-K" },
+    { ticker = "ONTO", form = "8-K" },
+    { ticker = "AMAT", form = "8-K" },
+    { ticker = "LRCX", form = "8-K" },
+    { ticker = "TER",  form = "8-K" },
+    { ticker = "ACLS", form = "8-K" },
+    { ticker = "CAMT", form = "8-K" },
+    { ticker = "ASML", form = "6-K" },
+] }
+
+# Federal Register — the official daily journal of US rules and notices. We
+# poll the Bureau of Industry and Security (BIS, the export-control rulemaker)
+# for "semiconductor" documents. The JSON API works with the default UA, so no
+# contact header is needed (unlike EDGAR).
+[[sources]]
+name = "Federal Register (BIS semiconductor)"
+url = "https://www.federalregister.gov/api/v1/articles.json"
+category = "policy"
+priority = 1
+kind = "federal_register"
+options = { agencies = ["industry-and-security-bureau"], term = "semiconductor", per_page = 20 }
+
+# ---------------------------------------------------------------------------
+# Company newsrooms (HTML scrape) — for makers that dropped RSS.
+#
+# kind = "scrape" routes these to adapters.fetch_scrape, which parses the
+# listing page with the CSS selectors in `options`. A browser-like user_agent
+# is required (these CDNs 403 the default UA). The selectors were derived by
+# fetching each live page once and inspecting the markup (June 2026) and ARE
+# BRITTLE: when a newsroom is re-skinned, refetch the page and re-derive the
+# {item, title, link, date} selectors here — no code change needed. The adapter
+# logs a warning and returns [] on any selector miss, so a stale selector just
+# means "no items from this source," never a crash.
+#
+# options keys:
+#   page_url - the listing page to fetch
+#   base_url - origin used to resolve relative links (absolute hrefs pass through)
+#   item     - CSS selector for each press-release element on the page
+#   title    - selector within an item for the headline ("" = use the item's text)
+#   link     - selector within an item for the <a> ("" = the item itself is the <a>)
+#   date     - selector within an item for the date ("" / missing = default to now)
+# ---------------------------------------------------------------------------
+
+[[sources]]
+name = "ASML (press releases)"
+url = "https://www.asml.com/en/news/press-releases"
+category = "company"
+priority = 1
+kind = "scrape"
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+options = { page_url = "https://www.asml.com/en/news/press-releases", base_url = "https://www.asml.com", item = "a.related-content-card--story", title = ".related-content-card-title", link = "", date = ".related-content-card-subtitle" }
+
+# KLA's own newsroom page server-renders the latest IR press releases as
+# .news-detail blocks (each a <time> + headline <a> to ir.kla.com). The
+# ir.kla.com listing itself is JS-rendered and yields nothing to a static
+# fetch, so we scrape www.kla.com/newsroom, which embeds the same items.
+[[sources]]
+name = "KLA (newsroom)"
+url = "https://www.kla.com/newsroom"
+category = "company"
+priority = 1
+kind = "scrape"
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+options = { page_url = "https://www.kla.com/newsroom", base_url = "https://www.kla.com", item = "div.news-detail", title = "a", link = "a", date = "time" }
+
+[[sources]]
+name = "Onto Innovation (news)"
+url = "https://ontoinnovation.com/news"
+category = "company"
+priority = 1
+kind = "scrape"
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+options = { page_url = "https://ontoinnovation.com/news", base_url = "https://ontoinnovation.com", item = ".news-article-item", title = ".news-article-item__title", link = ".news-article-item__title", date = ".news-article-item__date" }
+
+# SEMI.org currently sits behind a Cloudflare "Just a moment..." JS challenge
+# that a plain HTTP client can't pass, so this source 403s and the adapter
+# degrades to []. It's wired up (selectors are a best guess) so that if/when
+# the challenge is lifted or a headless-browser fetch path is added, it starts
+# producing items. Re-derive the selectors against a real page body first.
+[[sources]]
+name = "SEMI.org (news / press releases)"
+url = "https://www.semi.org/en/news-media-press-releases"
+category = "business"
+priority = 2
+kind = "scrape"
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+options = { page_url = "https://www.semi.org/en/news-media-press-releases", base_url = "https://www.semi.org", item = "div.views-row", title = "a", link = "a", date = "time" }

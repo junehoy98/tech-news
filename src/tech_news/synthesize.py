@@ -1,8 +1,11 @@
 """Second pass: Sonnet takes scored articles and writes clustered briefs.
 
-Each brief is a 60-100 word paragraph that may draw on multiple source
-articles covering the same news event. Sonnet also produces a one-line
-email subject and a short intro. The output is a Digest object.
+Most briefs are a 60-100 word paragraph that may draw on multiple source
+articles covering the same news event. The single most important story is
+written as a longer LEAD brief (~120-180 words) that carries the optics /
+metrology / lithography technical read a physics reader wants. Sonnet also
+produces a one-line email subject and a short intro. The output is a Digest
+object.
 
 This is where the editorial voice and length discipline live. The rubric
 in config/criteria.md drives both passes — this one just gets a focused
@@ -24,7 +27,9 @@ from .rank import RankedArticle
 log = logging.getLogger(__name__)
 
 SYNTHESIS_MODEL = "claude-sonnet-4-6"
-SYNTHESIS_MAX_TOKENS = 4000
+# Bigger budget: the digest now runs longer (one ~120-180 word lead brief plus
+# 6-8 regular briefs), so the previous 4000-token cap risked truncation.
+SYNTHESIS_MAX_TOKENS = 7000
 
 # Only items at or above this score are sent to the synthesizer. Lower than
 # the previous threshold because the synthesizer may use multiple weaker
@@ -32,10 +37,31 @@ SYNTHESIS_MAX_TOKENS = 4000
 MIN_SCORE_FOR_SYNTHESIS = 6
 
 # How many candidate articles the synthesizer sees. The model picks among
-# them and writes 4-6 briefs total.
-CANDIDATE_POOL_SIZE = 40
+# them and writes the lead plus the regular briefs.
+CANDIDATE_POOL_SIZE = 55
 
-DEFAULT_TARGET_BRIEFS = 5
+# Per-candidate body budget. The synthesizer sees far fewer items than the
+# ranker, so it can afford a longer slice of each article's fetched body to
+# write from — but still bounded so the whole candidate block stays compact.
+SYNTH_BODY_CHARS = 1500
+
+DEFAULT_TARGET_BRIEFS = 7
+
+# How far back the storyline-threading context looks. The synthesizer is told
+# what we reported over roughly the last week and a half so it can write the
+# UPDATE on a continuing story instead of re-introducing it cold. Kept short:
+# threads older than this have usually gone quiet, and a wider window only
+# bloats the prompt.
+THREAD_CONTEXT_DAYS = 10
+
+# Hard cap on how many prior briefs feed the "previously reported" block, so a
+# run of busy days can't balloon the synthesis prompt. Most recent days first.
+MAX_THREAD_BRIEFS = 24
+
+# Default archive location, mirroring main.py's data/digest_archive.jsonl under
+# the project root. Injectable so tests can point at a seeded fixture (or skip
+# threading entirely with a nonexistent path).
+DEFAULT_ARCHIVE_PATH = Path(__file__).resolve().parents[2] / "data" / "digest_archive.jsonl"
 
 
 class Citation(BaseModel):
@@ -78,6 +104,38 @@ class Brief(BaseModel):
     category: str = Field(description="company | tech | policy | business | opinion")
 
 
+class LeadBrief(Brief):
+    """The single most important story, written longer and deeper.
+
+    Same shape as a regular Brief (so the template and archive can render it
+    identically), but the paragraph runs ~120-180 words and carries the
+    optics / metrology / lithography technical read a physics reader wants.
+    """
+
+    paragraph: str = Field(
+        description=(
+            "Single paragraph of 120-180 words on the day's most important "
+            "story. Same plain American English voice and bolding rules as a "
+            "regular brief — NOT British/Economist style, NO 'why this "
+            "matters' / study-guide tail. The extra length goes to the "
+            "TECHNICAL read a physics/optics reader wants: when the story "
+            "touches optics, metrology, or lithography, explain what the "
+            "optical or metrology change actually IS in concrete physical "
+            "terms — numerical aperture and how it sets resolution, "
+            "wavelength, illumination or pupil shaping, overlay/alignment "
+            "error budgets in nanometers, the sensor or interferometer "
+            "principle, the resist or mask physics. Define semi-industry "
+            "jargon in tight 3-7 word parentheticals on first use; the reader "
+            "knows physics but not industry shorthand. If the lead story has "
+            "no optics/metrology/lithography angle, still run long but spend "
+            "the words on the substantive technical or business mechanics — "
+            "do not pad. Bold the same TWO things as a regular brief (first "
+            "entity mention + one punchline); the longer length does not mean "
+            "more bolds."
+        )
+    )
+
+
 class SynthesisResponse(BaseModel):
     email_subject: str = Field(
         description=(
@@ -96,8 +154,19 @@ class SynthesisResponse(BaseModel):
             "subject line already conveys the framing."
         )
     )
+    lead_brief: LeadBrief = Field(
+        description=(
+            "The single most important story of the day, written as a longer "
+            "(120-180 word) brief with the technical depth described above. "
+            "Exactly one; do not also include this story in `briefs`."
+        )
+    )
     briefs: list[Brief] = Field(
-        description="4-6 briefs covering the day's news, ordered by importance."
+        description=(
+            "The remaining 6-8 briefs covering the rest of the day's news, "
+            "ordered by importance. Each is 60-100 words. Does NOT repeat the "
+            "lead story."
+        )
     )
 
 
@@ -106,6 +175,7 @@ class Digest:
     date: date
     email_subject: str
     intro: str
+    lead_brief: Brief | None
     briefs: list[Brief]
     total_kept: int
     total_fetched: int
@@ -125,8 +195,15 @@ def synthesize(
     total_fetched: int,
     client: anthropic.Anthropic | None = None,
     target_briefs: int = DEFAULT_TARGET_BRIEFS,
+    archive_path: Path = DEFAULT_ARCHIVE_PATH,
 ) -> Digest:
-    """Cluster top-ranked items into a small set of briefs."""
+    """Cluster top-ranked items into a small set of briefs.
+
+    `archive_path` points at the per-day digest archive; recent digests are
+    folded into a "previously reported" block so the model writes the UPDATE on
+    a continuing story rather than re-introducing it cold. A missing or empty
+    archive (cold start) yields no thread block and behaves exactly as before.
+    """
     if not ranked:
         return _empty_digest(total_fetched)
 
@@ -136,7 +213,8 @@ def synthesize(
 
     client = client or anthropic.Anthropic()
     rubric = criteria_path.read_text(encoding="utf-8")
-    user_message = _format_candidates(candidates, target_briefs)
+    thread_block = _build_thread_context(archive_path)
+    user_message = _format_candidates(candidates, target_briefs, thread_block)
 
     response = client.messages.parse(
         model=SYNTHESIS_MODEL,
@@ -155,6 +233,7 @@ def synthesize(
         date=date.today(),
         email_subject=parsed.email_subject,
         intro=parsed.intro,
+        lead_brief=parsed.lead_brief,
         briefs=list(parsed.briefs),
         total_kept=len(candidates),
         total_fetched=total_fetched,
@@ -166,16 +245,121 @@ def _empty_digest(total_fetched: int) -> Digest:
         date=date.today(),
         email_subject="Semi Daily — no qualifying news",
         intro="Nothing crossed today's relevance threshold.",
+        lead_brief=None,
         briefs=[],
         total_kept=0,
         total_fetched=total_fetched,
     )
 
 
-def _format_candidates(candidates: list[RankedArticle], target_briefs: int) -> str:
+def _build_thread_context(archive_path: Path) -> str:
+    """Build the bounded "PREVIOUSLY REPORTED" block from the recent archive.
+
+    Reads the last THREAD_CONTEXT_DAYS of sent digests and distills them into a
+    compact reminder of what we already covered: the distinct topic_tags plus a
+    short headline/gist line per brief (lead first). The synthesizer uses this
+    to write the UPDATE on a continuing thread instead of re-explaining settled
+    background.
+
+    Returns "" on a cold start (missing/empty archive) or any read trouble, so
+    the synthesis prompt is byte-for-byte today's when there's no history. The
+    archive import is deferred to avoid a circular import (archive imports
+    Digest from this module).
+    """
+    try:
+        from . import archive
+
+        recent = archive.read_recent(archive_path, days=THREAD_CONTEXT_DAYS)
+    except Exception:  # noqa: BLE001 — threading is best-effort; never block a run
+        log.exception("Failed to read recent archive for threading; skipping thread block")
+        return ""
+
+    if not recent:
+        return ""
+
+    # Newest day first so the freshest context leads and the brief budget is
+    # spent on the most relevant threads.
+    tags: list[str] = []
+    brief_lines: list[str] = []
+    for record in reversed(recent):
+        date_str = record.get("date", "?")
+        for tag in record.get("topic_tags", []) or []:
+            if tag and tag not in tags:
+                tags.append(tag)
+
+        # Lead first, then the regular briefs for that day.
+        day_briefs = []
+        lead = record.get("lead_brief")
+        if lead:
+            day_briefs.append(lead)
+        day_briefs.extend(record.get("briefs", []) or [])
+
+        for b in day_briefs:
+            if len(brief_lines) >= MAX_THREAD_BRIEFS:
+                break
+            headline = (b.get("headline") or "").strip()
+            if not headline:
+                continue
+            gist = _first_sentence(b.get("paragraph") or "")
+            line = f"- ({date_str}) {headline}"
+            if gist:
+                line += f" — {gist}"
+            brief_lines.append(line)
+        if len(brief_lines) >= MAX_THREAD_BRIEFS:
+            break
+
+    if not brief_lines:
+        return ""
+
+    parts = [
+        "=== PREVIOUSLY REPORTED (last ~10 days) begin ===",
+        "",
+        "Below is what this digest already covered recently. For any candidate "
+        "today that CONTINUES one of these threads (its topic_tag matches or is "
+        "clearly related to a prior story), write THE UPDATE — the new "
+        "development and what changed since (e.g. 'a third tool shipped, after "
+        "last week's two') — and do NOT re-explain background the reader already "
+        "got. For genuinely new stories with no thread below, write as you "
+        "normally would.",
+        "",
+    ]
+    if tags:
+        parts.append("Prior topic tags: " + ", ".join(tags))
+        parts.append("")
+    parts.append("Prior briefs (newest first):")
+    parts.extend(brief_lines)
+    parts.append("")
+    parts.append("=== PREVIOUSLY REPORTED end ===")
+    return "\n".join(parts)
+
+
+def _first_sentence(text: str, max_chars: int = 160) -> str:
+    """A short, plain gist for the thread block: first sentence of a brief.
+
+    Strips markdown bold markers, takes up to the first sentence terminator, and
+    hard-caps the length so the "previously reported" block stays compact.
+    """
+    plain = text.replace("**", "").strip()
+    if not plain:
+        return ""
+    for end in (". ", ".\n", "; "):
+        idx = plain.find(end)
+        if 0 <= idx <= max_chars:
+            return plain[: idx + 1].strip()
+    if len(plain) <= max_chars:
+        return plain
+    return plain[:max_chars].rstrip() + "…"
+
+
+def _format_candidates(
+    candidates: list[RankedArticle],
+    target_briefs: int,
+    thread_block: str = "",
+) -> str:
     lines = [
         f"You have {len(candidates)} scored articles below. Synthesize them into "
-        f"{target_briefs} (4-6 acceptable) briefs for the daily digest.",
+        f"one LEAD brief plus {target_briefs} (6-8 acceptable) regular briefs for "
+        "the daily digest.",
         "",
         "Clustering: articles sharing the same topic_tag cover the same event — "
         "combine them into ONE brief that cites all relevant sources. Articles "
@@ -186,9 +370,23 @@ def _format_candidates(candidates: list[RankedArticle], target_briefs: int) -> s
         "Aim for breadth across categories (company / tech / policy / business / opinion) "
         "when the news supports it.",
         "",
-        "Each brief: a single 60-100 word paragraph in plain American English, "
-        "with citations to every article it draws on. Use **markdown bold** "
-        "SPARINGLY — emphasize the most important entity or fact, not every "
+        "LEAD brief: pick the single most important story of the day and write it "
+        "as the `lead_brief` — a longer 120-180 word paragraph. Spend the extra "
+        "length on the TECHNICAL read a physics/optics reader wants: when the "
+        "story touches optics, metrology, or lithography, explain what the optical "
+        "or metrology change actually IS in concrete physical terms (numerical "
+        "aperture and the resolution it buys, wavelength, illumination/pupil "
+        "shaping, overlay error budgets in nanometers, the sensor or "
+        "interferometer principle, resist or mask physics). If the lead has no "
+        "optics/metrology/lithography angle, still run long but on the real "
+        "technical or business mechanics — never pad. Same voice and SAME bolding "
+        "discipline as a regular brief (two bolds: first entity + one punchline); "
+        "longer does NOT mean more bolds. Do NOT also place the lead story in "
+        "`briefs`.",
+        "",
+        "Each regular brief: a single 60-100 word paragraph in plain American "
+        "English, with citations to every article it draws on. Use **markdown "
+        "bold** SPARINGLY — emphasize the most important entity or fact, not every "
         "company name. Vary sentence openers across briefs so the prose doesn't "
         "read as a template.",
         "",
@@ -196,6 +394,15 @@ def _format_candidates(candidates: list[RankedArticle], target_briefs: int) -> s
         "and a 25-45 word intro that frames the day. No 'why this matters' / "
         "study-guide framing anywhere. The reader knows why they're reading.",
         "",
+    ]
+    # Storyline threading: when there's recent history, drop the "previously
+    # reported" block in just ahead of today's candidates so the model can write
+    # the UPDATE on a continuing thread. Cold start leaves this empty -> the
+    # prompt is exactly today's.
+    if thread_block:
+        lines.append(thread_block)
+        lines.append("")
+    lines += [
         "=== candidates begin ===",
         "",
     ]
@@ -203,10 +410,13 @@ def _format_candidates(candidates: list[RankedArticle], target_briefs: int) -> s
         lines.append(f"score: {r.score}  category: {r.category}  topic_tag: {r.topic_tag}")
         lines.append(f"source: {r.article.source_name}")
         lines.append(f"title: {r.article.title}")
-        if r.article.summary:
-            # Trim long summaries to keep input compact.
-            snip = r.article.summary[:500]
-            lines.append(f"summary: {snip}")
+        # Prefer the fetched body (real reporting to write from) over the teaser;
+        # fall back to the summary when full text wasn't available. Both are
+        # trimmed to keep the candidate block compact.
+        if r.article.body:
+            lines.append(f"body: {r.article.body[:SYNTH_BODY_CHARS]}")
+        elif r.article.summary:
+            lines.append(f"summary: {r.article.summary[:500]}")
         lines.append(f"url: {r.article.url}")
         lines.append("")
     lines.append("=== candidates end ===")
