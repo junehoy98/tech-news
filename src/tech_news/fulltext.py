@@ -63,7 +63,15 @@ def enrich(
     if not articles:
         return 0
 
-    targets = articles[:max_articles] if max_articles > 0 else articles
+    # Order before capping so the budget goes where it's needed most. A scraped
+    # press release or a terse filing ships with NO teaser, so it can't be ranked
+    # at all without its body — read those first. Then by source priority. (The
+    # new EDGAR/scrape/Federal-Register sources sit at the end of the config, so
+    # a naive articles[:max_articles] in fetch order never reached them.) Sorting
+    # only changes WHICH items are enriched; body is set on the shared Article
+    # objects, so the caller's list is updated regardless of this order.
+    ordered = sorted(articles, key=_enrich_priority) if max_articles > 0 else articles
+    targets = ordered[:max_articles] if max_articles > 0 else articles
 
     owns_client = client is None
     if owns_client:
@@ -83,6 +91,18 @@ def enrich(
     finally:
         if owns_client:
             client.close()
+
+
+def _enrich_priority(article: Article) -> tuple[int, int]:
+    """Enrichment order: body-less items first, then by source priority.
+
+    An article with an empty/whitespace summary (scraped newsroom links, some
+    filings) is starved — the ranker would otherwise see only its headline — so
+    it gets the body-fetch budget ahead of teaser-bearing feed items. `sorted`
+    is stable, so original fetch order is preserved within each tier.
+    """
+    starved = 0 if not article.summary.strip() else 1
+    return (starved, article.priority)
 
 
 def _read_one(article: Article, client: httpx.Client) -> str:
