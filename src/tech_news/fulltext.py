@@ -15,12 +15,20 @@ still carries the item. Nothing here ever raises into the pipeline.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urljoin
 
 import httpx
 
 from .sources import USER_AGENT, Article
 
 log = logging.getLogger(__name__)
+
+# SEC rejects a generic User-Agent (the package USER_AGENT included) with a 403,
+# so EDGAR fetches in this module send a contact UA — the same convention the
+# EDGAR ingest adapter uses (see config/sources.toml). The full-text client is
+# shared across all sources and carries the package UA, so we override it
+# per-request for the EDGAR index + exhibit fetches.
+EDGAR_CONTACT_UA = "tech-news-digest (junehoy98@gmail.com)"
 
 # Cap on stored body length. ~4000 chars (~1K tokens) is plenty of lede +
 # nut-graf for the ranker and synthesizer without blowing up LLM input across a
@@ -41,6 +49,13 @@ DEFAULT_TIMEOUT = 15.0
 # We only read text/html (and the occasional XHTML). Anything else degrades to
 # body="" without spending a parse.
 _HTML_CONTENT_HINTS = ("text/html", "application/xhtml")
+
+# Exceptions a single fetch may raise that must degrade to body="" (never crash
+# the run). httpx.HTTPError covers timeouts/4xx/5xx/DNS, but a malformed URL —
+# from a feed or an EDGAR index href resolved via urljoin — raises off that
+# hierarchy: httpx.InvalidURL (e.g. a bad IPv6 literal) and a UnicodeError
+# (idna.IDNAError, on an invalid/overlong hostname label).
+_FETCH_ERRORS = (httpx.HTTPError, httpx.InvalidURL, UnicodeError)
 
 
 def enrich(
@@ -93,25 +108,49 @@ def enrich(
             client.close()
 
 
-def _enrich_priority(article: Article) -> tuple[int, int]:
-    """Enrichment order: body-less items first, then by source priority.
+# Primary-source kinds (a company's own press release, an SEC filing) that
+# routinely ship with NO usable teaser. They literally can't be ranked on their
+# headline, so they get first claim on the body-fetch budget — ahead of even
+# the generic body-less tier below.
+_PRIMARY_TEASERLESS_KINDS = frozenset({"scrape", "edgar"})
 
-    An article with an empty/whitespace summary (scraped newsroom links, some
-    filings) is starved — the ranker would otherwise see only its headline — so
-    it gets the body-fetch budget ahead of teaser-bearing feed items. `sorted`
-    is stable, so original fetch order is preserved within each tier.
+
+def _enrich_priority(article: Article) -> tuple[int, int, int]:
+    """Enrichment order: teaserless primary sources, then body-less, then priority.
+
+    Tiered so the body-fetch budget lands where it changes a ranking decision:
+
+    1. Primary sources that can't carry a teaser (scraped press releases, SEC
+       filings) — they ship body-less by nature, so without their fetched body
+       the ranker sees only a headline. These are read FIRST.
+    2. Any other article with an empty/whitespace summary — also starved of the
+       prose the ranker scores on, just less reliably so.
+    3. Everything else, ordered by source priority.
+
+    `sorted` is stable, so original fetch order is preserved within each tier.
     """
+    primary = 0 if article.kind in _PRIMARY_TEASERLESS_KINDS else 1
     starved = 0 if not article.summary.strip() else 1
-    return (starved, article.priority)
+    return (primary, starved, article.priority)
 
 
 def _read_one(article: Article, client: httpx.Client) -> str:
-    """Fetch one article URL and return its extracted body, or "" on any failure."""
+    """Fetch one article and return its extracted body, or "" on any failure.
+
+    An EDGAR filing's `url` is an SEC index page, not the prose — route those to
+    _read_edgar so we read the attached press release. Everything else is a
+    direct page fetch + extract.
+    """
+    if article.kind == "edgar":
+        return _read_edgar(article, client)
+
     try:
         resp = client.get(article.url)
         resp.raise_for_status()
-    except httpx.HTTPError as e:
-        # Timeout, 403, paywall redirect to login, DNS — all land here.
+    except _FETCH_ERRORS as e:
+        # Timeout, 403, paywall redirect to login, DNS — and the off-hierarchy
+        # httpx.InvalidURL / IDNA UnicodeError a malformed feed URL can raise —
+        # all land here and degrade this item to body="".
         log.debug("Full text skip %s: %s", article.url, e)
         return ""
 
@@ -132,6 +171,139 @@ def _read_one(article: Article, client: httpx.Client) -> str:
     if body:
         log.debug("Full text %d chars from %s", len(body), article.url)
     return body
+
+
+def _read_edgar(article: Article, client: httpx.Client) -> str:
+    """Read the prose behind an EDGAR filing — its press-release exhibit, not the index.
+
+    An EDGAR `article.url` points at a filing *index* page (a table of the
+    documents in the filing), so extracting it directly yields SEC chrome, not
+    the news. Instead we:
+
+      1. Fetch the index (with a contact UA — SEC 403s a generic one).
+      2. Find the primary press-release document: prefer an exhibit whose
+         type/description names an EX-99 (the earnings/press-release attachment),
+         else the main filing .htm document.
+      3. Resolve its absolute URL, fetch it, and extract THAT text.
+
+    Defensive: if the exhibit can't be located or fetched, fall back to
+    extracting the index page itself; any failure returns "" like every other
+    source. Never raises into the pipeline.
+    """
+    index_html = _fetch_edgar_html(article.url, client)
+    if not index_html:
+        return ""
+
+    doc_url = _find_edgar_primary_doc(index_html, article.url)
+    if doc_url and doc_url != article.url:
+        doc_html = _fetch_edgar_html(doc_url, client)
+        if doc_html:
+            body = _extract(doc_html, doc_url)
+            if body:
+                log.debug("EDGAR full text %d chars from exhibit %s", len(body), doc_url)
+                return body
+        # Exhibit was named but couldn't be fetched/extracted — fall through to
+        # the index page so we still return *something* over nothing.
+
+    body = _extract(index_html, article.url)
+    if body:
+        log.debug("EDGAR full text %d chars from index %s", len(body), article.url)
+    return body
+
+
+def _fetch_edgar_html(url: str, client: httpx.Client) -> str:
+    """GET an SEC URL with the contact UA; "" on HTTP error or non-HTML body."""
+    try:
+        resp = client.get(url, headers={"User-Agent": EDGAR_CONTACT_UA})
+        resp.raise_for_status()
+    except _FETCH_ERRORS as e:
+        # HTTP errors plus the off-hierarchy URL/encoding errors (httpx.InvalidURL,
+        # idna's UnicodeError) that a malformed index href can raise — all degrade
+        # this fetch to "" rather than escaping into enrich().
+        log.debug("EDGAR skip %s: %s", url, e)
+        return ""
+
+    content_type = resp.headers.get("content-type", "").lower()
+    if content_type and not any(hint in content_type for hint in _HTML_CONTENT_HINTS):
+        log.debug("EDGAR skip %s: non-HTML content-type %r", url, content_type)
+        return ""
+
+    try:
+        return resp.text
+    except (UnicodeDecodeError, ValueError) as e:
+        log.debug("EDGAR skip %s: undecodable body (%s)", url, e)
+        return ""
+
+
+def _find_edgar_primary_doc(index_html: str, index_url: str) -> str:
+    """Resolve the URL of a filing's press-release document from its index page.
+
+    The index page tables list each document with a Type column and a link to
+    the document. We prefer a row whose type/description contains "EX-99" (the
+    press release / earnings attachment), and otherwise fall back to the first
+    linked .htm/.html document that isn't the index itself. Returns "" if no
+    usable document link is found (caller then reads the index directly).
+    """
+    from bs4 import BeautifulSoup
+
+    try:
+        soup = BeautifulSoup(index_html, "html.parser")
+    except Exception as e:  # parser shouldn't raise, but never let it escape
+        log.debug("EDGAR index parse failed for %s: %s", index_url, e)
+        return ""
+
+    ex99_href: str | None = None
+    first_doc_href: str | None = None
+
+    for row in soup.find_all("tr"):
+        # An anchor to the actual document; index rows without a link are headers.
+        link = row.find("a", href=True)
+        if link is None:
+            continue
+        # Modern index pages link the primary document through the inline-XBRL
+        # viewer ("/ix?doc=/Archives/.../doc.htm"), which serves a JS shell, not
+        # prose. Unwrap to the raw document path so we fetch the real filing.
+        href = _unwrap_ix_viewer(link["href"])
+        # The row's full text carries the Type column (e.g. "EX-99.1") and the
+        # human description, so a substring check catches either placement.
+        row_text = row.get_text(" ", strip=True).upper()
+        is_html_doc = href.lower().endswith((".htm", ".html"))
+
+        if "EX-99" in row_text and is_html_doc and ex99_href is None:
+            ex99_href = href
+        if is_html_doc and first_doc_href is None and not _is_index_href(href):
+            first_doc_href = href
+
+    chosen = ex99_href or first_doc_href
+    if not chosen:
+        return ""
+    return urljoin(index_url, chosen)
+
+
+def _is_index_href(href: str) -> bool:
+    """True for a link that points back at an index page, not a filing document."""
+    low = href.lower()
+    return "-index" in low or low.endswith("/index.htm") or low.endswith("/index.html")
+
+
+def _unwrap_ix_viewer(href: str) -> str:
+    """Strip the inline-XBRL viewer wrapper from a document href.
+
+    SEC index pages link a filing's primary (iXBRL-tagged) document through the
+    interactive viewer as "/ix?doc=/Archives/.../doc.htm". Fetching that URL
+    returns only a "Please enable JavaScript" shell, so we extract the inner
+    `doc=` path and fetch the raw document instead. A non-viewer href, or a
+    viewer href without a usable inner path, is returned unchanged.
+    """
+    from urllib.parse import parse_qs, urlsplit
+
+    # Match the viewer regardless of host ("/ix?doc=..." or ".../ix?doc=...").
+    split = urlsplit(href)
+    if split.path.endswith("/ix") or split.path == "ix":
+        doc = parse_qs(split.query).get("doc", [""])[0]
+        if doc:
+            return doc
+    return href
 
 
 def _extract(html: str, url: str) -> str:

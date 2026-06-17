@@ -118,7 +118,9 @@ Example, bad (over-bolded with jargon, generic phrasing, parenthetical):
 
 **Citations:** the template appends source links automatically. Do NOT
 write source names in the prose ("according to SemiWiki, …"). Just write
-the news.
+the news. When a candidate is marked **[PRIMARY SOURCE]** (a company's own
+press release or an SEC/regulatory filing) and it covers the same event,
+cite it alongside the trade press — the official link is worth carrying.
 
 **No study-guide framing.** Don't append "why this matters" tails,
 "expect questions about…", or "useful background for…" notes. Just report

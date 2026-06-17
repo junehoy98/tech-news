@@ -70,6 +70,11 @@ class Article:
     # yielded no extractable prose (paywall, PDF, 403). Consumers prefer it over
     # `summary` when present but always fall back to the teaser.
     body: str = ""
+    # Provenance of the item, mirroring the producing Source.kind. Lets
+    # downstream code distinguish a PRIMARY source — a company's own press
+    # release ("scrape") or an SEC filing ("edgar") — from trade-press/RSS.
+    # Set by each builder; defaults to "rss", which covers every plain feed.
+    kind: str = "rss"
 
     @property
     def fingerprint(self) -> str:
@@ -128,6 +133,7 @@ def _fetch_rss(source: Source, client: httpx.Client) -> list[Article]:
                 source_name=source.name,
                 category=source.category,
                 priority=source.priority,
+                kind="rss",
             )
         )
     return articles

@@ -151,6 +151,49 @@ def test_format_candidates_mentions_lead_brief(article_factory):
     assert "6-8" in prompt
 
 
+def test_format_candidates_marks_primary_sources(article_factory):
+    # One scrape (company press release), one edgar (SEC filing), one plain RSS.
+    candidates = [
+        RankedArticle(
+            article=article_factory(
+                url="https://asml.com/pr", title="ASML press release", kind="scrape"
+            ),
+            score=9, category="company", topic_tag="ASML High-NA",
+        ),
+        RankedArticle(
+            article=article_factory(
+                url="https://sec.gov/filing", title="ASML 8-K", kind="edgar"
+            ),
+            score=8, category="company", topic_tag="ASML High-NA",
+        ),
+        RankedArticle(
+            article=article_factory(
+                url="https://semiwiki.com/post", title="SemiWiki coverage", kind="rss"
+            ),
+            score=7, category="company", topic_tag="ASML High-NA",
+        ),
+    ]
+    prompt = _format_candidates(candidates, target_briefs=7)
+
+    # The marker renders on the primary candidates' source lines.
+    assert "ASML press release" in prompt
+    assert "[PRIMARY SOURCE]" in prompt
+    # Both primary kinds are marked: the marker appears at least twice (scrape + edgar).
+    assert prompt.count("[PRIMARY SOURCE]") >= 2
+
+    # The plain-RSS candidate's source line is NOT marked.
+    rss_source_line = next(
+        ln for ln in prompt.splitlines()
+        if ln.startswith("source:") and "TestSource" in ln and "[PRIMARY SOURCE]" not in ln
+    )
+    assert rss_source_line is not None
+
+    # The citation instruction is present and tells the model to keep the primary link.
+    assert "Primary sources:" in prompt
+    assert "alongside the trade-press citations" in prompt
+    assert "never invent a citation" in prompt
+
+
 def _seed_archive(path: Path, *, day: date, tags: list[str], briefs: list[dict],
                   lead: dict | None = None) -> None:
     """Write one prior-digest line to a JSONL archive, in the shape archive.py emits."""

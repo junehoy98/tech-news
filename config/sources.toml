@@ -175,6 +175,14 @@ priority = 2
 # (current report) and the ADR-listed foreign issuer (ASML) files 6-K
 # (report of foreign issuer). `options.count` caps each filer's feed;
 # filter_recent trims by date downstream.
+#
+# 8-K is the MATERIAL-EVENTS form: earnings land as Item 2.02 (Results of
+# Operations) and M&A/agreements as Item 1.01 / 2.01, each usually with the
+# press release attached as an EX-99 exhibit — fulltext.py reads that exhibit's
+# prose, not the index chrome. We keep count low (5) so routine filings
+# (insider Form 4s, bylaw tweaks under Item 5.03, etc.) don't flood the ranker;
+# those score low on relevance downstream and drop out, so no extra filtering
+# is needed here.
 [[sources]]
 name = "SEC EDGAR (equipment makers)"
 url = "https://www.sec.gov/cgi-bin/browse-edgar"
@@ -182,7 +190,7 @@ category = "company"
 priority = 1
 kind = "edgar"
 user_agent = "tech-news-digest (junehoy98@gmail.com)"
-options = { count = 10, filings = [
+options = { count = 5, filings = [
     { ticker = "KLAC", form = "8-K" },
     { ticker = "ONTO", form = "8-K" },
     { ticker = "AMAT", form = "8-K" },

@@ -126,6 +126,7 @@ def _fetch_edgar_one(
                 source_name=source.name,
                 category=source.category,
                 priority=source.priority,
+                kind="edgar",
             )
         )
     return articles
@@ -215,6 +216,7 @@ def fetch_federal_register(source: Source, client: httpx.Client) -> list[Article
                 source_name=source.name,
                 category=source.category,
                 priority=source.priority,
+                kind="federal_register",
             )
         )
     return articles
@@ -362,6 +364,7 @@ def _scrape_one(
         source_name=source.name,
         category=source.category,
         priority=source.priority,
+        kind="scrape",
     )
 
 

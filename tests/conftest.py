@@ -15,6 +15,7 @@ def make_article(
     category: str = "tech",
     priority: int = 1,
     published: datetime | None = None,
+    kind: str = "rss",
 ) -> Article:
     return Article(
         url=url,
@@ -24,6 +25,7 @@ def make_article(
         source_name=source_name,
         category=category,
         priority=priority,
+        kind=kind,
     )
 
 

@@ -80,6 +80,8 @@ def test_edgar_parses_us_8k_fixture():
     assert first.source_name == "SEC EDGAR (semi equipment)"
     assert first.category == "company"
     assert first.priority == 1
+    # Provenance: a filing is a PRIMARY source, tagged "edgar".
+    assert first.kind == "edgar"
 
 
 def test_edgar_published_is_tz_aware_utc():
@@ -216,6 +218,8 @@ def test_federal_register_parses_fixture():
     assert first.source_name == "Federal Register (BIS)"
     assert first.category == "policy"
     assert first.priority == 1
+    # Provenance: a Federal Register notice is tagged "federal_register".
+    assert first.kind == "federal_register"
 
 
 def test_federal_register_published_is_tz_aware_utc():
@@ -390,6 +394,8 @@ def test_scrape_parses_asml_fixture():
     assert first.source_name == "ASML (press releases)"
     assert first.category == "company"
     assert first.priority == 1
+    # Provenance: a scraped newsroom release is a PRIMARY source, tagged "scrape".
+    assert first.kind == "scrape"
 
 
 def test_scrape_resolves_relative_link_against_base_url():

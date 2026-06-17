@@ -70,6 +70,8 @@ def test_fetch_source_rss_parses_sample_feed():
     assert articles[0].source_name == "Sample"
     assert articles[0].category == "tech"
     assert articles[0].priority == 1
+    # Provenance: a plain RSS item is tagged "rss" (the default and explicit).
+    assert articles[0].kind == "rss"
 
 
 def test_fetch_source_unknown_kind_returns_empty():

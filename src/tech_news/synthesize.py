@@ -47,6 +47,12 @@ SYNTH_BODY_CHARS = 1500
 
 DEFAULT_TARGET_BRIEFS = 7
 
+# Article kinds that are PRIMARY sources — a company's own press release
+# ("scrape") or an SEC filing ("edgar"), plus regulatory filings
+# ("federal_register"). These get a visible marker on their source line so the
+# synthesizer knows to cite the official/primary link alongside the trade press.
+_PRIMARY_KINDS = frozenset({"scrape", "edgar", "federal_register"})
+
 # How far back the storyline-threading context looks. The synthesizer is told
 # what we reported over roughly the last week and a half so it can write the
 # UPDATE on a continuing story instead of re-introducing it cold. Kept short:
@@ -370,6 +376,14 @@ def _format_candidates(
         "Aim for breadth across categories (company / tech / policy / business / opinion) "
         "when the news supports it.",
         "",
+        "Primary sources: a candidate whose source line is marked [PRIMARY SOURCE] is "
+        "the official/primary record — a company's own press release or an SEC / "
+        "regulatory filing. When clustering an event, if a [PRIMARY SOURCE] candidate "
+        "covers it, INCLUDE its citation alongside the trade-press citations; readers "
+        "value the official link. Only cite primary candidates ACTUALLY present in the "
+        "list below — never invent a citation. This does not change the prose voice or "
+        "the bolding rules.",
+        "",
         "LEAD brief: pick the single most important story of the day and write it "
         "as the `lead_brief` — a longer 120-180 word paragraph. Spend the extra "
         "length on the TECHNICAL read a physics/optics reader wants: when the "
@@ -408,7 +422,10 @@ def _format_candidates(
     ]
     for r in candidates:
         lines.append(f"score: {r.score}  category: {r.category}  topic_tag: {r.topic_tag}")
-        lines.append(f"source: {r.article.source_name}")
+        # Mark primary sources (own press release / SEC / regulatory filing) so the
+        # model knows to cite the official link alongside the trade press.
+        primary_marker = " [PRIMARY SOURCE]" if r.article.kind in _PRIMARY_KINDS else ""
+        lines.append(f"source: {r.article.source_name}{primary_marker}")
         lines.append(f"title: {r.article.title}")
         # Prefer the fetched body (real reporting to write from) over the teaser;
         # fall back to the summary when full text wasn't available. Both are
