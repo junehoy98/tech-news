@@ -24,8 +24,16 @@ jobs:
   digest:
     runs-on: ubuntu-latest
     timeout-minutes: 350  # under the 360-min hard cap; covers the longest (winter) wait
+    # Needed by the "Commit the digest archive" step below, which pushes the
+    # day's archive line back to main.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        # The archive commit pushes back to this same branch, so check out the
+        # branch by name rather than the detached SHA a schedule/dispatch gives.
+        with:
+          ref: ${{ github.ref_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -56,3 +64,39 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           DIGEST_TO_ADDRESS: ${{ secrets.DIGEST_TO_ADDRESS }}
         run: python -m tech_news.main --send-at 08:58:37 --send-tz America/New_York
+
+      - name: Commit the digest archive
+        # data/digest_archive.jsonl is the durable record of what went out and
+        # the input to storyline threading (synthesize._build_thread_context).
+        # It used to live only in the runner workspace, so it evaporated after
+        # every run and threading always cold-started -- which is why the same
+        # story could lead the digest five times in nine days. Committing it
+        # back to main fixes that, and the daily commit doubles as a keepalive:
+        # GitHub disables scheduled workflows after 60 days of repository
+        # inactivity, which is exactly what silently killed this digest on
+        # 2026-08-17.
+        #
+        # Runs even if the digest step failed, so a partial archive still
+        # persists; no-ops cleanly on a dry/"already sent"/nothing-new run that
+        # leaves the file unchanged.
+        if: always()
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Absent on the very first run, and on any run that dies before the
+          # send. `git add` on a missing path is a hard error under `set -e`.
+          if [ ! -f data/digest_archive.jsonl ]; then
+            echo "No archive file yet -- nothing to commit."
+            exit 0
+          fi
+          git add -- data/digest_archive.jsonl
+          if git diff --cached --quiet; then
+            echo "No new archive entry to commit."
+            exit 0
+          fi
+          git commit -m "Archive digest for $(date -u +%Y-%m-%d)"
+          # A concurrent commit to main is unlikely (the concurrency group
+          # serializes digest runs) but cheap to tolerate.
+          git pull --rebase --autostash origin "${{ github.ref_name }}"
+          git push origin "HEAD:${{ github.ref_name }}"

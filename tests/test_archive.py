@@ -11,9 +11,15 @@ from tech_news.synthesize import Brief, Citation, Digest, LeadBrief
 
 UTC = timezone.utc
 
+# read_recent() filters on a window relative to *today*, so the default digest
+# date has to move with the calendar. It used to be hardcoded to 2026-06-16,
+# which silently aged out of the 30-day window the round-trip tests use and
+# turned three passing tests into failures on 2026-07-16 with no code change.
+YESTERDAY = datetime.now(UTC).date() - timedelta(days=1)
+
 
 def _digest(
-    d: date = date(2026, 6, 16),
+    d: date = YESTERDAY,
     subject: str = "ASML ships High-NA; BIS tightens export rules",
     intro: str = "A busy day in lithography and policy.",
 ) -> Digest:
@@ -75,7 +81,7 @@ def test_append_then_read_roundtrip(tmp_path, article_factory):
     records = read_recent(path, days=30)
     assert len(records) == 1
     rec = records[0]
-    assert rec["date"] == "2026-06-16"
+    assert rec["date"] == YESTERDAY.isoformat()
     assert rec["email_subject"] == digest.email_subject
     assert rec["intro"] == digest.intro
 
@@ -178,7 +184,7 @@ def test_append_tolerates_empty_ranked(tmp_path):
 def test_append_records_null_lead_when_absent(tmp_path, article_factory):
     path = tmp_path / "digest_archive.jsonl"
     digest = Digest(
-        date=date(2026, 6, 16),
+        date=YESTERDAY,
         email_subject="no qualifying news",
         intro="Nothing crossed the threshold.",
         lead_brief=None,

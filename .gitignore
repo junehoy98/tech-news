@@ -14,8 +14,11 @@ dist/
 venv/
 env/
 
-# Local data and output
-data/
+# Local data and output. The digest archive is the one exception: it is the
+# durable record of what actually went out, it feeds storyline threading across
+# days, and CI commits it back after each send (see .github/workflows/daily.yml).
+data/*
+!data/digest_archive.jsonl
 out/
 *.sqlite
 *.sqlite3
