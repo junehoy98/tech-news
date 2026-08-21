@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -153,7 +154,14 @@ def rank_articles(
         # the failure alert fires and a backup scheduled run can retry.
         raise RuntimeError(f"All {len(batches)} ranking batches failed — aborting run")
 
-    ranked.sort(key=lambda r: (-r.score, r.article.priority))
+    # Order: score, then freshness (a 7-day-old item shouldn't beat today's
+    # news at equal score), then source priority as the final tiebreak.
+    now = datetime.now(timezone.utc)
+    def _sort_key(r: RankedArticle) -> tuple:
+        age_days = max(0, (now - r.article.published).days)
+        return (-r.score, age_days, r.article.priority)
+
+    ranked.sort(key=_sort_key)
     return ranked
 
 
@@ -205,7 +213,10 @@ def _log_usage(response: object, idx: int, total: int) -> None:
 def _format_articles(articles: list[Article]) -> str:
     n = len(articles)
     lines = [
-        f"Below are {n} articles fetched from RSS feeds today.",
+        f"Below are {n} recent articles from the digest's sources — trade-press",
+        "RSS feeds, company newsroom press releases, SEC filings, and Federal",
+        "Register documents. Some are up to a week old; each carries its",
+        "published date.",
         "",
         f"Return EXACTLY {n} ItemScore entries — one per article, no more, no less.",
         "Echo each article's fingerprint verbatim; do NOT invent fingerprints.",
@@ -223,6 +234,7 @@ def _format_articles(articles: list[Article]) -> str:
     for a in articles:
         lines.append(f"fingerprint: {a.fingerprint}")
         lines.append(f"source: {a.source_name} (suggested category: {a.category})")
+        lines.append(f"published: {a.published:%Y-%m-%d}")
         lines.append(f"title: {a.title}")
         # Prefer the fetched article body over the RSS teaser; fall back to the
         # summary when full-text reading found nothing (paywall, PDF, disabled).

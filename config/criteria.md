@@ -55,6 +55,10 @@ wants**, not to more adjectives or recap:
   or pupil shaping, overlay/alignment error budgets in nanometers, the sensor
   or interferometer principle, resist or mask physics. State the number and
   the mechanism, not just that something "improved."
+- **Ground every figure in the source text.** A number (NA, wavelength, nm,
+  dollars, percent) may appear in a brief ONLY if it appears in the provided
+  article excerpts. When the excerpt lacks the number, explain the mechanism
+  qualitatively — never fill in a figure from memory, however plausible.
 - When the lead has **no optics/metrology/lithography angle**, still run long,
   but spend the words on the real technical or business mechanics of the story
   (the supply chain, the capex math, the policy instrument). Never pad to hit

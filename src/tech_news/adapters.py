@@ -16,6 +16,7 @@ module runs, every name it needs from sources already exists.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from urllib.parse import urljoin
 
@@ -75,6 +76,27 @@ def fetch_edgar(source: Source, client: httpx.Client) -> list[Article]:
     return articles
 
 
+# 8-K item codes worth the digest's attention: material agreements (1.01/1.02),
+# completed M&A (2.01), results (2.02), Reg FD disclosures (7.01), other
+# material events (8.01). Director changes (5.02), bylaw amendments (5.03),
+# vote results (5.07) and exhibit-only 9.01 filings are routine noise. An 8-K
+# entry listing ONLY non-newsworthy items is skipped before it can burn an
+# enrichment slot; entries with no parseable item codes are kept.
+NEWSWORTHY_8K_ITEMS = frozenset({"1.01", "1.02", "2.01", "2.02", "7.01", "8.01"})
+
+_ITEM_CODE_RE = re.compile(r"Item\s+(\d+\.\d+)", re.IGNORECASE)
+
+
+def _edgar_items_newsworthy(form: str, raw_summary: str) -> bool:
+    """False only for an 8-K whose listed items are all routine."""
+    if form.upper() != "8-K":
+        return True
+    codes = set(_ITEM_CODE_RE.findall(raw_summary or ""))
+    if not codes:
+        return True
+    return bool(codes & NEWSWORTHY_8K_ITEMS)
+
+
 def _fetch_edgar_one(
     source: Source,
     client: httpx.Client,
@@ -109,6 +131,10 @@ def _fetch_edgar_one(
     for entry in parsed.entries:
         url = entry.get("link")
         if not url:
+            continue
+
+        if not _edgar_items_newsworthy(form, entry.get("summary", "")):
+            log.debug("Skipping routine %s 8-K: %s", filer, entry.get("title", ""))
             continue
 
         title = _edgar_title(filer, form, entry)

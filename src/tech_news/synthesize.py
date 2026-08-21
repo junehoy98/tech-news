@@ -22,14 +22,11 @@ from pathlib import Path
 import anthropic
 from pydantic import BaseModel, Field
 
-from .rank import RankedArticle
+from .rank import LLM_MAX_RETRIES, RANKING_MODEL, RankedArticle
 
 log = logging.getLogger(__name__)
 
 SYNTHESIS_MODEL = "claude-sonnet-4-6"
-
-# SDK-level retries for transient API failures (429/529/timeouts).
-LLM_MAX_RETRIES = 5
 # Bigger budget: the digest now runs longer (one ~120-180 word lead brief plus
 # 6-8 regular briefs), so the previous 4000-token cap risked truncation.
 SYNTHESIS_MAX_TOKENS = 7000
@@ -47,6 +44,12 @@ CANDIDATE_POOL_SIZE = 55
 # ranker, so it can afford a longer slice of each article's fetched body to
 # write from — but still bounded so the whole candidate block stays compact.
 SYNTH_BODY_CHARS = 1500
+
+# The top few candidates get a deeper slice: the lead brief is written from
+# these, and the grounding rule below forbids numbers not present in the
+# excerpt, so the likely-lead sources need enough text to carry real figures.
+SYNTH_DEEP_BODY_CHARS = 3000
+SYNTH_DEEP_CANDIDATES = 10
 
 DEFAULT_TARGET_BRIEFS = 7
 
@@ -75,6 +78,19 @@ MAX_THREAD_TAGS = 40
 # the project root. Injectable so tests can point at a seeded fixture (or skip
 # threading entirely with a nonexistent path).
 DEFAULT_ARCHIVE_PATH = Path(__file__).resolve().parents[2] / "data" / "digest_archive.jsonl"
+
+
+class TagGroup(BaseModel):
+    canonical: str = Field(description="The canonical tag for this news event")
+    variants: list[str] = Field(
+        description="Every input tag (verbatim) that refers to this same event"
+    )
+
+
+class TagConsolidation(BaseModel):
+    groups: list[TagGroup] = Field(
+        description="Groups of input tags that refer to the same news event"
+    )
 
 
 class Citation(BaseModel):
@@ -234,6 +250,7 @@ def synthesize(
     # guard emails a failure alert, and the next backup scheduled run retries
     # the whole day since the sent-marker was never written.
     client = client or anthropic.Anthropic(max_retries=LLM_MAX_RETRIES)
+    _consolidate_tags(candidates, client)
     rubric = criteria_path.read_text(encoding="utf-8")
     thread_block = _build_thread_context(archive_path)
     user_message = _format_candidates(candidates, target_briefs, thread_block)
@@ -252,6 +269,10 @@ def synthesize(
         return _empty_digest(total_fetched, digest_date)
 
     _clean_citations(parsed, candidates)
+
+    lead_words = len(parsed.lead_brief.paragraph.split()) if parsed.lead_brief else 0
+    if lead_words and not (100 <= lead_words <= 190):
+        log.warning("Lead brief is %d words (target 120-180)", lead_words)
 
     return Digest(
         date=digest_date,
@@ -273,6 +294,67 @@ def _empty_digest(total_fetched: int, digest_date: date | None = None) -> Digest
         briefs=[],
         total_kept=0,
         total_fetched=total_fetched,
+    )
+
+
+def _consolidate_tags(candidates: list[RankedArticle], client: anthropic.Anthropic) -> None:
+    """Merge topic_tags that name the same news event, across ranking batches.
+
+    The ranker scores in independent batches of 40 that never see each other's
+    tags, so the same story routinely gets near-duplicate tags ("ASML High-NA
+    ship" vs "ASML ships High-NA") and the synthesizer's tag-equality
+    clustering falls apart (~175 distinct tags for one day was observed). One
+    cheap Haiku call over just the candidates' tags maps variants onto a
+    canonical form. Best-effort: any failure leaves tags untouched.
+    """
+    tags = sorted({r.topic_tag.strip() for r in candidates if r.topic_tag.strip()})
+    if len(tags) < 2:
+        return
+    prompt = (
+        "The following topic tags were assigned to news articles by independent "
+        "passes that could not see each other's output, so the SAME news event "
+        "may appear under several near-duplicate tags. Group tags that refer to "
+        "the same news event; echo each input tag verbatim in exactly one "
+        "group's `variants`. Do NOT merge tags about different events, even for "
+        "the same company. A tag with no duplicates gets its own group.\n\n"
+        + "\n".join(f"- {t}" for t in tags)
+    )
+    try:
+        response = client.messages.parse(
+            model=RANKING_MODEL,
+            max_tokens=3000,
+            messages=[{"role": "user", "content": prompt}],
+            output_format=TagConsolidation,
+        )
+    except anthropic.APIError as e:
+        log.warning("Tag consolidation failed (%s); keeping raw tags", e)
+        return
+    parsed = response.parsed_output
+    if parsed is None:
+        log.warning("Tag consolidation returned no parsed output; keeping raw tags")
+        return
+
+    try:
+        mapping = {
+            v.strip().casefold(): g.canonical.strip()
+            for g in parsed.groups
+            for v in g.variants
+            if v.strip() and g.canonical.strip()
+        }
+    except Exception as e:  # noqa: BLE001 — best-effort; malformed output keeps raw tags
+        log.warning("Tag consolidation output unusable (%s); keeping raw tags", e)
+        return
+    if not mapping:
+        return
+    merged = 0
+    for r in candidates:
+        canon = mapping.get(r.topic_tag.strip().casefold())
+        if canon and canon != r.topic_tag:
+            r.topic_tag = canon
+            merged += 1
+    log.info(
+        "Tag consolidation: %d tags -> %d canonical groups (%d articles remapped)",
+        len(tags), len(parsed.groups), merged,
     )
 
 
@@ -429,8 +511,8 @@ def _format_candidates(
         "Primary sources: a candidate whose source line is marked [PRIMARY SOURCE] is "
         "the official/primary record — a company's own press release or an SEC / "
         "regulatory filing. When clustering an event, if a [PRIMARY SOURCE] candidate "
-        "covers it, INCLUDE its citation alongside the trade-press citations; readers "
-        "value the official link. Only cite primary candidates ACTUALLY present in the "
+        "covers it, INCLUDE its citation alongside the trade-press citations, listed "
+        "FIRST; readers value the official link. Only cite primary candidates ACTUALLY present in the "
         "list below — never invent a citation. This does not change the prose voice or "
         "the bolding rules.",
         "",
@@ -441,7 +523,11 @@ def _format_candidates(
         "or metrology change actually IS in concrete physical terms (numerical "
         "aperture and the resolution it buys, wavelength, illumination/pupil "
         "shaping, overlay error budgets in nanometers, the sensor or "
-        "interferometer principle, resist or mask physics). If the lead has no "
+        "interferometer principle, resist or mask physics). GROUNDING: include a "
+        "specific figure (NA, wavelength, nm, dollars, percent) ONLY if it appears "
+        "in the candidate text below — when the excerpt lacks the number, explain "
+        "the mechanism qualitatively instead. NEVER supply figures from memory. "
+        "If the lead has no "
         "optics/metrology/lithography angle, still run long but on the real "
         "technical or business mechanics — never pad. Same voice and SAME bolding "
         "discipline as a regular brief (two bolds: first entity + one punchline); "
@@ -470,7 +556,8 @@ def _format_candidates(
         "=== candidates begin ===",
         "",
     ]
-    for r in candidates:
+    for i, r in enumerate(candidates):
+        body_budget = SYNTH_DEEP_BODY_CHARS if i < SYNTH_DEEP_CANDIDATES else SYNTH_BODY_CHARS
         lines.append(f"score: {r.score}  category: {r.category}  topic_tag: {r.topic_tag}")
         # Mark primary sources (own press release / SEC / regulatory filing) so the
         # model knows to cite the official link alongside the trade press.
@@ -481,7 +568,7 @@ def _format_candidates(
         # fall back to the summary when full text wasn't available. Both are
         # trimmed to keep the candidate block compact.
         if r.article.body:
-            lines.append(f"body: {r.article.body[:SYNTH_BODY_CHARS]}")
+            lines.append(f"body: {r.article.body[:body_budget]}")
         elif r.article.summary:
             lines.append(f"summary: {r.article.summary[:500]}")
         lines.append(f"url: {r.article.url}")

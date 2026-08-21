@@ -63,19 +63,21 @@ def test_edgar_parses_us_8k_fixture():
 
     articles = fetch_source(src, client)
 
-    assert len(articles) == 2
+    # The fixture holds two 8-Ks: a routine one (Items 5.03/9.01 — bylaws) that
+    # the newsworthiness filter drops, and a results one (Item 2.02) that stays.
+    assert len(articles) == 1
     first = articles[0]
     # url is the filing-index link.
     assert first.url == (
         "https://www.sec.gov/Archives/edgar/data/319201/"
-        "000119312526269375/0001193125-26-269375-index.htm"
+        "000031920126000014/0000319201-26-000014-index.htm"
     )
     # title is a readable filer + form + description string.
     assert first.title == "KLA CORP — 8-K: Current report"
     # summary is HTML-stripped (no tags) and carries the item descriptions.
     assert "<" not in first.summary
     assert "AccNo:" in first.summary
-    assert "Item 5.03" in first.summary
+    assert "Item 2.02" in first.summary
     # Metadata is carried from the Source.
     assert first.source_name == "SEC EDGAR (semi equipment)"
     assert first.category == "company"
@@ -90,9 +92,10 @@ def test_edgar_published_is_tz_aware_utc():
 
     first = fetch_source(src, client)[0]
 
-    # <updated> was 2026-06-12T16:05:07-04:00; normalized to UTC it's 20:05:07.
+    # The surviving (Item 2.02) entry's <updated> was 2026-04-29T16:06:15-04:00;
+    # normalized to UTC that's 20:06:15.
     assert first.published.tzinfo == UTC
-    assert first.published.isoformat() == "2026-06-12T20:05:07+00:00"
+    assert first.published.isoformat() == "2026-04-29T20:06:15+00:00"
 
 
 def test_edgar_parses_foreign_6k_fixture():
@@ -156,8 +159,9 @@ def test_edgar_per_filer_error_is_skipped_not_fatal():
 
     articles = fetch_source(src, client)
 
-    # The 403 filer contributes nothing; the healthy filer's items survive.
-    assert len(articles) == 2
+    # The 403 filer contributes nothing; the healthy filer's newsworthy
+    # item survives (the routine 5.03 filing is filtered).
+    assert len(articles) == 1
     assert all(a.source_name == src.name for a in articles)
 
 
@@ -170,7 +174,23 @@ def test_edgar_skips_malformed_filing_entry():
 
     # Only the well-formed entry triggers a fetch.
     assert client.get.call_count == 1
-    assert len(articles) == 2
+    assert len(articles) == 1
+
+
+def test_edgar_item_newsworthiness_filter():
+    from tech_news.adapters import _edgar_items_newsworthy
+
+    # Routine-only 8-K items are dropped...
+    assert not _edgar_items_newsworthy(
+        "8-K", "Item 5.02: Departure of Directors<br>Item 9.01: Exhibits"
+    )
+    # ...one newsworthy item rescues the entry...
+    assert _edgar_items_newsworthy(
+        "8-K", "Item 5.03: Bylaws<br>Item 8.01: Other Events"
+    )
+    # ...no parseable items keeps the entry, and non-8-K forms always pass.
+    assert _edgar_items_newsworthy("8-K", "no items here")
+    assert _edgar_items_newsworthy("6-K", "Item 5.02: whatever")
 
 
 def test_edgar_no_filings_returns_empty():

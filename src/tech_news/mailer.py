@@ -59,6 +59,28 @@ def render_html(
     return template.render(digest=digest, source_warnings=source_warnings or [])
 
 
+def render_text(digest: Digest, source_warnings: list[str] | None = None) -> str:
+    """Plain-text alternative body — same content as the HTML, no markup."""
+
+    def _plain(t: str) -> str:
+        return (t or "").replace("**", "")
+
+    lines = [f"SEMI DAILY — {digest.date_long}", ""]
+    if digest.intro:
+        lines += [_plain(digest.intro), ""]
+    briefs = ([digest.lead_brief] if digest.lead_brief else []) + list(digest.briefs)
+    for b in briefs:
+        lines.append(b.headline)
+        lines.append(_plain(b.paragraph))
+        if b.citations:
+            lines.append("  " + " | ".join(f"{c.source}: {c.url}" for c in b.citations))
+        lines.append("")
+    if source_warnings:
+        lines.append("Source health: " + " ; ".join(source_warnings))
+        lines.append("")
+    return "\n".join(lines)
+
+
 def send(
     html: str,
     *,
@@ -66,12 +88,13 @@ def send(
     from_address: str,
     to_address: str,
     app_password: str,
+    text: str | None = None,
 ) -> None:
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = from_address
     msg["To"] = to_address
-    msg.set_content("This is an HTML email. View in an HTML-capable client.")
+    msg.set_content(text or "This is an HTML email. View in an HTML-capable client.")
     msg.add_alternative(html, subtype="html")
 
     _send_with_retry(msg, from_address, app_password)

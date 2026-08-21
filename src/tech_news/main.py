@@ -273,6 +273,7 @@ def _run(args: argparse.Namespace) -> int:
         from_address=from_address,
         to_address=args.to,
         app_password=app_password,
+        text=mailer.render_text(digest, source_warnings=source_warnings),
     )
     db.mark_seen(new_articles)
     if send_day is not None:

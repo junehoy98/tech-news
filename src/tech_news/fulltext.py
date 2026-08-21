@@ -35,11 +35,23 @@ EDGAR_CONTACT_UA = "tech-news-digest (junehoy98@gmail.com)"
 # whole batch; the rest of a long feature adds cost, not signal.
 MAX_BODY_CHARS = 4000
 
+# Floor on a USEFUL extraction. Paywall stubs ("Subscribe to continue reading")
+# and cookie-wall chrome extract to a few dozen chars, and a non-empty body
+# SUPPRESSES the RSS summary in both LLM passes — so a thin extraction that is
+# also shorter than the teaser is worse than no body at all.
+MIN_BODY_CHARS = 400
+
 # How many of the (already recency-trimmed, deduped) new articles to enrich.
 # Bounds the number of outbound fetches per run; the ranker's batch math and
 # the synthesis candidate pool are the real consumers, so there's no point
 # reading the long tail that won't survive scoring.
 DEFAULT_MAX_ARTICLES = 60
+
+# Cap on tier-1 (teaserless primary: scrape/edgar) enrichment slots. Routine
+# 8-Ks and press-release listings once consumed 51 of the 60 slots and starved
+# the trade press that actually carries the day's news. Overflow primaries
+# still get any budget left after the other tiers.
+TIER1_MAX_SLOTS = 24
 
 # Per-request timeout. Newsrooms can be slow; a stuck fetch shouldn't stall the
 # run, so this is short and a timeout simply degrades that item to body="".
@@ -86,7 +98,15 @@ def enrich(
     # only changes WHICH items are enriched; body is set on the shared Article
     # objects, so the caller's list is updated regardless of this order.
     ordered = sorted(articles, key=_enrich_priority) if max_articles > 0 else articles
-    targets = ordered[:max_articles] if max_articles > 0 else articles
+    if max_articles > 0:
+        # Bound tier-1 (teaserless primary) to TIER1_MAX_SLOTS so filings and
+        # press-release listings can't starve the trade press; primaries past
+        # the cap requeue at the end and use whatever budget remains.
+        tier1 = [a for a in ordered if a.kind in _PRIMARY_TEASERLESS_KINDS]
+        rest = [a for a in ordered if a.kind not in _PRIMARY_TEASERLESS_KINDS]
+        targets = (tier1[:TIER1_MAX_SLOTS] + rest + tier1[TIER1_MAX_SLOTS:])[:max_articles]
+    else:
+        targets = articles
 
     owns_client = client is None
     if owns_client:
@@ -99,6 +119,14 @@ def enrich(
         fetched = 0
         for article in targets:
             body = _read_one(article, client)
+            if body and len(body) < MIN_BODY_CHARS and len(body) < len(article.summary.strip()):
+                # Thin extraction (paywall stub / page chrome) that would
+                # SUPPRESS a richer teaser downstream — drop it.
+                log.debug(
+                    "Discarding %d-char extraction for %s (teaser is richer)",
+                    len(body), article.url,
+                )
+                body = ""
             if body:
                 article.body = body
                 fetched += 1
