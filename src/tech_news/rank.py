@@ -24,6 +24,10 @@ log = logging.getLogger(__name__)
 # Haiku 4.5: fast and cheap; the scoring rubric doesn't need a frontier model.
 RANKING_MODEL = "claude-haiku-4-5"
 
+# SDK-level retries for transient API failures (429/529/timeouts). The SDK
+# default of 2 has let a bad half-hour kill the day's digest.
+LLM_MAX_RETRIES = 5
+
 # Articles are scored in batches rather than one giant call. A single
 # "return EXACTLY N entries" request gets unreliable as N grows — the model
 # truncates (overflowing max_tokens → no parsed output → empty digest) or
@@ -92,7 +96,7 @@ def rank_articles(
     if not articles:
         return []
 
-    client = client or anthropic.Anthropic()
+    client = client or anthropic.Anthropic(max_retries=LLM_MAX_RETRIES)
     rubric = criteria_path.read_text(encoding="utf-8")
     by_fp = {a.fingerprint: a for a in articles}
 
@@ -101,8 +105,16 @@ def rank_articles(
         for i in range(0, len(articles), RANKING_BATCH_SIZE)
     ]
     ranked: list[RankedArticle] = []
+    failed_batches = 0
     for n, batch in enumerate(batches, start=1):
-        items = _score_batch(batch, rubric, client, n, len(batches))
+        try:
+            items = _score_batch(batch, rubric, client, n, len(batches))
+        except anthropic.APIError as e:
+            # SDK retries are exhausted at this point. Skip the batch (its
+            # articles default to score 0 below) rather than sinking the run.
+            log.error("Ranking batch %d/%d failed after retries: %s", n, len(batches), e)
+            failed_batches += 1
+            items = []
 
         scored_fps: set[str] = set()
         for item in items:
@@ -134,6 +146,12 @@ def rank_articles(
                         topic_tag="",
                     )
                 )
+
+    if failed_batches == len(batches):
+        # Every article would carry a default score of 0 and the digest would
+        # go out as a false "no qualifying news" email. Abort loudly instead so
+        # the failure alert fires and a backup scheduled run can retry.
+        raise RuntimeError(f"All {len(batches)} ranking batches failed — aborting run")
 
     ranked.sort(key=lambda r: (-r.score, r.article.priority))
     return ranked

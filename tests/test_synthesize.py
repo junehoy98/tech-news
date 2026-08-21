@@ -328,3 +328,44 @@ def test_synthesize_thread_context_drops_stale_days(article_factory, tmp_path):
     # read_recent's window filtering means the stale day yields no records.
     assert "PREVIOUSLY REPORTED" not in prompt
     assert "Ancient thread" not in prompt
+
+
+def test_clean_citations_dedupes_and_drops_uncandidate_urls(article_factory):
+    from unittest.mock import MagicMock
+
+    from tech_news.synthesize import _clean_citations
+
+    candidates = [
+        RankedArticle(
+            article=article_factory(url="https://real.example.com/a"),
+            score=8,
+            category="company",
+            topic_tag="t",
+        )
+    ]
+    lead = LeadBrief(
+        headline="Lead",
+        paragraph="p",
+        citations=[
+            Citation(source="Real", url="https://real.example.com/a"),
+            Citation(source="Real again", url="https://real.example.com/a"),  # dup URL
+        ],
+        category="company",
+    )
+    brief = Brief(
+        headline="B",
+        paragraph="p",
+        citations=[
+            Citation(source="Hallucinated", url="https://invented.example.com/x"),
+            Citation(source="Real", url="https://real.example.com/a"),
+        ],
+        category="tech",
+    )
+    parsed = MagicMock()
+    parsed.lead_brief = lead
+    parsed.briefs = [brief]
+
+    _clean_citations(parsed, candidates)
+
+    assert [c.url for c in lead.citations] == ["https://real.example.com/a"]
+    assert [c.url for c in brief.citations] == ["https://real.example.com/a"]

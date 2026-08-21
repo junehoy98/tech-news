@@ -27,6 +27,9 @@ from .rank import RankedArticle
 log = logging.getLogger(__name__)
 
 SYNTHESIS_MODEL = "claude-sonnet-4-6"
+
+# SDK-level retries for transient API failures (429/529/timeouts).
+LLM_MAX_RETRIES = 5
 # Bigger budget: the digest now runs longer (one ~120-180 word lead brief plus
 # 6-8 regular briefs), so the previous 4000-token cap risked truncation.
 SYNTHESIS_MAX_TOKENS = 7000
@@ -227,7 +230,10 @@ def synthesize(
     if not candidates:
         return _empty_digest(total_fetched, digest_date)
 
-    client = client or anthropic.Anthropic()
+    # An APIError here (after SDK retries) propagates on purpose: main()'s
+    # guard emails a failure alert, and the next backup scheduled run retries
+    # the whole day since the sent-marker was never written.
+    client = client or anthropic.Anthropic(max_retries=LLM_MAX_RETRIES)
     rubric = criteria_path.read_text(encoding="utf-8")
     thread_block = _build_thread_context(archive_path)
     user_message = _format_candidates(candidates, target_briefs, thread_block)

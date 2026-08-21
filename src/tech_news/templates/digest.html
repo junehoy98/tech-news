@@ -184,6 +184,11 @@
   {{ render_brief(brief) }}
   {% endfor %}
 
+  {% if source_warnings %}
+  <div class="footer">
+    Source health: {% for w in source_warnings %}{{ w }}{% if not loop.last %} &middot; {% endif %}{% endfor %}
+  </div>
+  {% endif %}
   <div class="footer">
     {{ digest.briefs | length + (1 if digest.lead_brief else 0) }} briefs from
     {{ digest.total_kept }} scored articles

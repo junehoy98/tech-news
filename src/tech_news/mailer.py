@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import smtplib
+import time
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -36,8 +37,17 @@ log = logging.getLogger(__name__)
 GMAIL_SMTP_HOST = "smtp.gmail.com"
 GMAIL_SMTP_PORT = 465  # SSL
 
+# A transient SMTP hiccup used to forfeit the whole (paid) pipeline run —
+# retry a few times before giving up.
+SEND_ATTEMPTS = 3
+SEND_RETRY_BACKOFF_S = 20
 
-def render_html(digest: Digest, templates_dir: Path) -> str:
+
+def render_html(
+    digest: Digest,
+    templates_dir: Path,
+    source_warnings: list[str] | None = None,
+) -> str:
     env = Environment(
         loader=FileSystemLoader(templates_dir),
         autoescape=select_autoescape(["html"]),
@@ -46,7 +56,7 @@ def render_html(digest: Digest, templates_dir: Path) -> str:
     )
     env.filters["bold_md"] = _bold_md
     template = env.get_template("digest.html")
-    return template.render(digest=digest)
+    return template.render(digest=digest, source_warnings=source_warnings or [])
 
 
 def send(
@@ -64,7 +74,41 @@ def send(
     msg.set_content("This is an HTML email. View in an HTML-capable client.")
     msg.add_alternative(html, subtype="html")
 
-    with smtplib.SMTP_SSL(GMAIL_SMTP_HOST, GMAIL_SMTP_PORT) as smtp:
-        smtp.login(from_address, app_password)
-        smtp.send_message(msg)
+    _send_with_retry(msg, from_address, app_password)
     log.info("Sent digest to %s", to_address)
+
+
+def send_text(
+    body: str,
+    *,
+    subject: str,
+    from_address: str,
+    to_address: str,
+    app_password: str,
+) -> None:
+    """Send a small plain-text message (used for failure alerts)."""
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = from_address
+    msg["To"] = to_address
+    msg.set_content(body)
+    _send_with_retry(msg, from_address, app_password)
+    log.info("Sent plain-text mail to %s", to_address)
+
+
+def _send_with_retry(msg: EmailMessage, from_address: str, app_password: str) -> None:
+    for attempt in range(1, SEND_ATTEMPTS + 1):
+        try:
+            with smtplib.SMTP_SSL(GMAIL_SMTP_HOST, GMAIL_SMTP_PORT) as smtp:
+                smtp.login(from_address, app_password)
+                smtp.send_message(msg)
+            return
+        except (smtplib.SMTPException, OSError) as e:
+            if attempt == SEND_ATTEMPTS:
+                raise
+            wait = SEND_RETRY_BACKOFF_S * attempt
+            log.warning(
+                "SMTP send failed (attempt %d/%d): %s — retrying in %ds",
+                attempt, SEND_ATTEMPTS, e, wait,
+            )
+            time.sleep(wait)

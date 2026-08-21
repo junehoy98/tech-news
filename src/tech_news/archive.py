@@ -120,6 +120,24 @@ def read_recent(path: Path, days: int) -> list[dict]:
     return records
 
 
+def cited_urls_recent(path: Path, days: int) -> list[str]:
+    """Distinct URLs cited by digests sent in the last `days` — the seed set
+    for rebuilding the dedupe DB after an Actions-cache eviction."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    for record in read_recent(path, days=days):
+        briefs = list(record.get("briefs") or [])
+        if record.get("lead_brief"):
+            briefs.append(record["lead_brief"])
+        for b in briefs:
+            for c in b.get("citations") or []:
+                u = c.get("url")
+                if u and u not in seen:
+                    seen.add(u)
+                    urls.append(u)
+    return urls
+
+
 def _within_window(date_str: object, cutoff: date) -> bool:
     """True if `date_str` (ISO date) is on or after `cutoff`.
 

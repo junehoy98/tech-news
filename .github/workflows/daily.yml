@@ -10,9 +10,14 @@ on:
     # earliest run, a later one still lands before the send time. `concurrency`
     # + the "already sent today" marker ensure exactly one email goes out.
     # Day-of-week 1-5 = Mon-Fri (Sun=0, Sat=6).
-    - cron: "27 8 * * 1-5"   # primary: ~4.5 h slack before the 9 AM ET send
-    - cron: "27 9 * * 1-5"   # backup
-    - cron: "27 10 * * 1-5"  # backup
+    # Starts sit ~1.5-2.5 h before the 08:58 ET send in both DST seasons
+    # (11:27 UTC = 07:27 EDT / 06:27 EST) instead of the old 4.5+ h, cutting
+    # the idle runner sleep roughly in half. The 13:27 start lands after the
+    # send in summer (09:27 EDT) — it then either no-ops via the already-sent
+    # marker or delivers late as the last-resort backup.
+    - cron: "27 11 * * 1-5"  # primary
+    - cron: "27 12 * * 1-5"  # backup
+    - cron: "27 13 * * 1-5"  # backup
 
 # Never cancel the in-progress (sleeping) run; later triggers queue behind it
 # and then no-op via the already-sent marker.

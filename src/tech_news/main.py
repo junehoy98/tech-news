@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -113,6 +114,15 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    try:
+        return _run(args)
+    except Exception:
+        log.exception("Digest run failed")
+        _send_failure_alert(args)
+        return 1
+
+
+def _run(args: argparse.Namespace) -> int:
     root: Path = args.root
     sources_path = root / "config" / "sources.toml"
     criteria_path = root / "config" / "criteria.md"
@@ -127,6 +137,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.reset_seen:
         wiped = db.clear()
         log.info("Wiped %d entries from the dedupe DB (--reset-seen)", wiped)
+    elif db.count_seen() == 0:
+        # An empty dedupe DB with real archive history means the Actions cache
+        # was evicted. Seed the cited URLs so the digest doesn't re-report the
+        # stories it already sent.
+        seeded = archive.cited_urls_recent(
+            root / "data" / "digest_archive.jsonl", days=store.DEFAULT_RETENTION_DAYS
+        )
+        if seeded:
+            db.mark_seen_urls(seeded)
+            log.warning(
+                "Dedupe DB was empty but the archive has history (cache evicted?) — "
+                "seeded %d previously-cited URLs.", len(seeded),
+            )
 
     # In scheduled mode, several staggered runners may start (backups against
     # GitHub dropping the earliest run). The first to send records the date; any
@@ -146,6 +169,18 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Fetching feeds...")
     all_articles = sources.fetch_all(src_list)
     log.info("Fetched %d total articles", len(all_articles))
+
+    # Track per-source yields so a silently dead source (re-skinned newsroom,
+    # feed 5xx streak) surfaces as a warning instead of quiet shrinkage.
+    run_date = datetime.now(ZoneInfo(args.send_tz)).date().isoformat()
+    counts = {src.name: 0 for src in src_list}
+    for a in all_articles:
+        if a.source_name in counts:
+            counts[a.source_name] += 1
+    db.record_yields(counts, run_date)
+    source_warnings = db.zero_yield_warnings(counts, run_date)
+    for w in source_warnings:
+        log.warning("Source gone quiet — %s", w)
 
     recent = sources.filter_recent(all_articles, max_age_days=args.max_age_days)
     if len(recent) != len(all_articles):
@@ -191,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Email subject would be: %r", f"{digest.email_subject} — {digest.date_short}")
 
     templates_dir = Path(__file__).resolve().parent / "templates"
-    html = mailer.render_html(digest, templates_dir)
+    html = mailer.render_html(digest, templates_dir, source_warnings=source_warnings)
 
     if args.dry_run:
         out_path = root / "out" / "digest.html"
@@ -249,6 +284,34 @@ def main(argv: list[str] | None = None) -> int:
     archive.append_digest(digest, ranked, root / "data" / "digest_archive.jsonl")
     log.info("Done.")
     return 0
+
+
+def _send_failure_alert(args: argparse.Namespace) -> None:
+    """Best-effort plain-text email so a failed run is a same-day signal, not a
+    silence discovered by absence (see the 2026-08-17 workflow-disable incident).
+    Swallows its own errors — alerting must never mask the original failure."""
+    if args.dry_run:
+        return
+    to_address = args.to or os.environ.get("DIGEST_TO_ADDRESS")
+    from_address = os.environ.get("GMAIL_FROM_ADDRESS")
+    app_password = os.environ.get("GMAIL_APP_PASSWORD")
+    if not (to_address and from_address and app_password):
+        return
+    try:
+        body = (
+            "The daily digest run failed with an unhandled error.\n\n"
+            + traceback.format_exc()
+            + "\nA backup scheduled run (if any remain today) will retry automatically.\n"
+        )
+        mailer.send_text(
+            body,
+            subject=f"Semi Daily FAILED — {datetime.now(ZoneInfo(args.send_tz)).date().isoformat()}",
+            from_address=from_address,
+            to_address=to_address,
+            app_password=app_password,
+        )
+    except Exception:  # noqa: BLE001 — never let alerting mask the real failure
+        log.exception("Also failed to send the failure-alert email")
 
 
 def _check_setup(root: Path, sources_path: Path, criteria_path: Path) -> int:

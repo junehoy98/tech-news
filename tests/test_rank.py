@@ -141,3 +141,50 @@ def test_rank_articles_survives_failed_batch(article_factory, tmp_path):
     assert len(ranked) == 1
     assert ranked[0].article is a
     assert ranked[0].score == 0
+
+
+def test_rank_articles_survives_api_error_on_one_batch(article_factory, tmp_path):
+    import anthropic as _anthropic
+
+    articles = [
+        article_factory(url=f"https://example.com/{i}", title=f"Item {i}")
+        for i in range(RANKING_BATCH_SIZE + 1)
+    ]
+    ok = MagicMock()
+    ok.parsed_output = RankingResponse(
+        items=[
+            ItemScore(
+                fingerprint=articles[-1].fingerprint,
+                score=8,
+                category="tech",
+                topic_tag="t",
+            )
+        ]
+    )
+    fake_client = MagicMock()
+    fake_client.messages.parse.side_effect = [
+        _anthropic.APIConnectionError(request=None),  # batch 1 dies after SDK retries
+        ok,  # batch 2 fine
+    ]
+    criteria = tmp_path / "criteria.md"
+    criteria.write_text("rubric", encoding="utf-8")
+
+    ranked = rank_articles(articles, criteria, client=fake_client)
+
+    # Batch 1's articles survive with default score 0; batch 2 scored normally.
+    assert len(ranked) == len(articles)
+    assert ranked[0].score == 8
+
+
+def test_rank_articles_raises_when_every_batch_fails(article_factory, tmp_path):
+    import anthropic as _anthropic
+    import pytest
+
+    articles = [article_factory(url="https://example.com/x")]
+    fake_client = MagicMock()
+    fake_client.messages.parse.side_effect = _anthropic.APIConnectionError(request=None)
+    criteria = tmp_path / "criteria.md"
+    criteria.write_text("rubric", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="ranking batches failed"):
+        rank_articles(articles, criteria, client=fake_client)

@@ -72,3 +72,38 @@ def test_sent_marker_roundtrip(tmp_path):
     assert db.already_sent("2026-05-29") is False
     db.mark_sent("2026-05-28")
     assert db.already_sent("2026-05-28") is True
+
+
+def test_source_yield_tracking_warns_after_three_zero_runs(tmp_path):
+    db = Store(tmp_path / "seen.sqlite")
+    # Healthy history, then three straight zero days.
+    db.record_yields({"KLA Newsroom": 4, "SemiWiki": 7}, "2026-08-14")
+    db.record_yields({"KLA Newsroom": 0, "SemiWiki": 6}, "2026-08-17")
+    db.record_yields({"KLA Newsroom": 0, "SemiWiki": 5}, "2026-08-18")
+
+    counts = {"KLA Newsroom": 0, "SemiWiki": 4}
+    db.record_yields(counts, "2026-08-19")
+    warnings = db.zero_yield_warnings(counts, "2026-08-19")
+    assert len(warnings) == 1
+    assert warnings[0].startswith("KLA Newsroom:")
+    assert "2026-08-14" in warnings[0]  # names the last day it produced items
+
+
+def test_source_yield_no_warning_for_recent_or_never_yielding(tmp_path):
+    db = Store(tmp_path / "seen.sqlite")
+    # SEMI.org has never yielded (config problem, not a regression);
+    # Onto yielded yesterday so a single zero day is normal news flow.
+    db.record_yields({"SEMI.org": 0, "Onto": 3}, "2026-08-17")
+    db.record_yields({"SEMI.org": 0, "Onto": 2}, "2026-08-18")
+    counts = {"SEMI.org": 0, "Onto": 0}
+    db.record_yields(counts, "2026-08-19")
+    assert db.zero_yield_warnings(counts, "2026-08-19") == []
+
+
+def test_mark_seen_urls_matches_article_fingerprints(tmp_path, article_factory):
+    db = Store(tmp_path / "seen.sqlite")
+    a = article_factory(url="https://example.com/story")
+    db.mark_seen_urls([a.url])
+    assert db.count_seen() == 1
+    # A real fetch of the same URL dedupes against the seeded row.
+    assert db.filter_new([a]) == []
