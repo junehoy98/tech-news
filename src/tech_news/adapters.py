@@ -407,19 +407,95 @@ def _scrape_date(item, date_sel: str) -> datetime:
             # <time datetime="2026-05-13T20:00:00+00:00"> beats the human label.
             raw = date_node.get("datetime") or date_node.get_text(" ", strip=True)
             if raw:
-                try:
-                    dt = date_parser.parse(raw)
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=UTC)
-                    return dt.astimezone(UTC)
-                except (ValueError, TypeError, OverflowError):
-                    pass
+                for fuzzy in (False, True):
+                    # Second, fuzzy pass digs the date out of label text like
+                    # "News - August 11, 2026" (ASM stamps one).
+                    try:
+                        dt = date_parser.parse(raw, fuzzy=fuzzy)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=UTC)
+                        return dt.astimezone(UTC)
+                    except (ValueError, TypeError, OverflowError):
+                        continue
     return datetime.now(UTC)
 
 
-# Side-effect registration: makes EDGAR, the Federal Register, and the HTML
-# scraper available to fetch_source via Source.kind. Importing tech_news.sources
-# pulls this module in (see sources.py).
+# Hacker News via the Algolia Search API — a real JSON API replacing the
+# 502-prone hnrss.org bridge that used to carry ALL keyword coverage. The
+# extra params matter: restrictSearchableAttributes=title + typoTolerance=false
+# keep a query like "ASML" from matching noise in comments/body text.
+HN_ALGOLIA_URL = "https://hn.algolia.com/api/v1/search_by_date"
+HN_DEFAULT_MIN_POINTS = 5
+HN_HITS_PER_QUERY = 30
+
+
+def fetch_hn_algolia(source: Source, client: httpx.Client) -> list[Article]:
+    """Fetch recent HN stories matching each keyword query in options.
+
+    options shape:
+        {"queries": ["ASML", "EUV lithography", ...],
+         "min_points": 5}  # optional, defaults to HN_DEFAULT_MIN_POINTS
+
+    One API call per query; a failed query is logged and skipped. Stories are
+    deduped by URL across queries.
+    """
+    headers = {"User-Agent": source.user_agent or USER_AGENT}
+    queries = source.options.get("queries") or []
+    min_points = source.options.get("min_points", HN_DEFAULT_MIN_POINTS)
+
+    articles: list[Article] = []
+    seen_urls: set[str] = set()
+    for query in queries:
+        params = {
+            "query": query,
+            "tags": "story",
+            "restrictSearchableAttributes": "title",
+            "typoTolerance": "false",
+            "numericFilters": f"points>={min_points}",
+            "hitsPerPage": HN_HITS_PER_QUERY,
+        }
+        try:
+            resp = client.get(HN_ALGOLIA_URL, params=params, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+        except (httpx.HTTPError, ValueError) as e:
+            log.warning("%s: skipping HN query %r: %s", source.name, query, e)
+            continue
+
+        for hit in data.get("hits", []):
+            title = (hit.get("title") or "").strip()
+            # Link-less stories (Ask/Show HN text posts) fall back to the HN
+            # discussion page so the item is still readable.
+            url = hit.get("url") or (
+                f"https://news.ycombinator.com/item?id={hit.get('objectID')}"
+                if hit.get("objectID") else ""
+            )
+            if not title or not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            try:
+                published = date_parser.parse(hit.get("created_at", "")).astimezone(UTC)
+            except (ValueError, TypeError):
+                published = datetime.now(UTC)
+            articles.append(
+                Article(
+                    url=url,
+                    title=title,
+                    summary=_strip_html(hit.get("story_text") or "")[:1000],
+                    published=published,
+                    source_name=source.name,
+                    category=source.category,
+                    priority=source.priority,
+                    kind="rss",
+                )
+            )
+    return articles
+
+
+# Side-effect registration: makes EDGAR, the Federal Register, the HTML
+# scraper, and HN-via-Algolia available to fetch_source via Source.kind.
+# Importing tech_news.sources pulls this module in (see sources.py).
 INGESTORS["edgar"] = fetch_edgar
 INGESTORS["federal_register"] = fetch_federal_register
 INGESTORS["scrape"] = fetch_scrape
+INGESTORS["hn_algolia"] = fetch_hn_algolia

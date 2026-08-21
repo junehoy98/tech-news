@@ -18,6 +18,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import anthropic
 from pydantic import BaseModel, Field
@@ -366,17 +367,23 @@ def _clean_citations(parsed: SynthesisResponse, candidates: list[RankedArticle])
     Mutates the parsed briefs in place. A brief whose citations ALL turn out
     invalid keeps an empty list — the template tolerates it — and logs loudly,
     because that brief is unsourced prose.
+
+    URLs are compared NORMALIZED (host case, trailing slash, tracking params,
+    fragment) because feeds ship tracking-tagged URLs (?utm_source=rss...) and
+    the model cites the clean canonical form — an exact match would drop that
+    legitimate citation.
     """
-    valid_urls = {r.article.url for r in candidates}
+    valid_urls = {_normalize_url(r.article.url) for r in candidates}
     briefs = ([parsed.lead_brief] if parsed.lead_brief else []) + list(parsed.briefs)
     for b in briefs:
         seen: set[str] = set()
         kept: list[Citation] = []
         for c in b.citations:
-            if c.url in seen:
+            norm = _normalize_url(c.url)
+            if norm in seen:
                 continue
-            seen.add(c.url)
-            if c.url not in valid_urls:
+            seen.add(norm)
+            if norm not in valid_urls:
                 log.warning(
                     "Dropping citation not in candidate set: %r (%s) on brief %r",
                     c.source, c.url, b.headline,
@@ -386,6 +393,23 @@ def _clean_citations(parsed: SynthesisResponse, candidates: list[RankedArticle])
         if not kept and b.citations:
             log.error("Brief %r has no valid citations left after cleaning", b.headline)
         b.citations = kept
+
+
+def _normalize_url(url: str) -> str:
+    """Canonical form for citation matching: lowercase host, no trailing slash,
+    no fragment, tracking query params (utm_*, fbclid, gclid) stripped."""
+    try:
+        parts = urlsplit((url or "").strip())
+    except ValueError:
+        return (url or "").strip()
+    query = "&".join(
+        pair
+        for pair in parts.query.split("&")
+        if pair and not pair.lower().startswith(("utm_", "fbclid", "gclid"))
+    )
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), query, "")
+    )
 
 
 def _build_thread_context(archive_path: Path) -> str:

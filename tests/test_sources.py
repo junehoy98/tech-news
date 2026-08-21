@@ -9,6 +9,7 @@ from tech_news.sources import (
     fetch_all,
     fetch_source,
     filter_recent,
+    load_sources,
 )
 
 UTC = timezone.utc
@@ -141,3 +142,26 @@ def test_fetch_all_isolates_a_crashing_source(article_factory, caplog):
     # The crashing source contributed nothing; the healthy source after it survived.
     assert articles == [good_article]
     assert any("Boom" in r.message and "unexpected fetch error" in r.message for r in caplog.records)
+
+
+def test_load_sources_skips_disabled(tmp_path):
+    cfg = tmp_path / "sources.toml"
+    cfg.write_text(
+        """
+[[sources]]
+name = "Alive"
+url = "https://example.com/feed"
+category = "tech"
+priority = 1
+
+[[sources]]
+name = "Parked"
+url = "https://example.com/dead"
+category = "tech"
+priority = 1
+enabled = false
+""",
+        encoding="utf-8",
+    )
+    srcs = load_sources(cfg)
+    assert [s.name for s in srcs] == ["Alive"]

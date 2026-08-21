@@ -369,3 +369,35 @@ def test_clean_citations_dedupes_and_drops_uncandidate_urls(article_factory):
 
     assert [c.url for c in lead.citations] == ["https://real.example.com/a"]
     assert [c.url for c in brief.citations] == ["https://real.example.com/a"]
+
+
+def test_clean_citations_matches_despite_tracking_params(article_factory):
+    from unittest.mock import MagicMock
+
+    from tech_news.synthesize import _clean_citations
+
+    # Feed URL carries RSS tracking params; the model cites the clean
+    # canonical form (with a trailing slash, no query). Both must match.
+    candidates = [
+        RankedArticle(
+            article=article_factory(
+                url="https://site.example.com/story?utm_source=rss&utm_medium=rss"
+            ),
+            score=8,
+            category="company",
+            topic_tag="t",
+        )
+    ]
+    brief = Brief(
+        headline="B",
+        paragraph="p",
+        citations=[Citation(source="Site", url="https://site.example.com/story/")],
+        category="tech",
+    )
+    parsed = MagicMock()
+    parsed.lead_brief = None
+    parsed.briefs = [brief]
+
+    _clean_citations(parsed, candidates)
+
+    assert [c.url for c in brief.citations] == ["https://site.example.com/story/"]

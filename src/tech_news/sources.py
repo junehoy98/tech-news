@@ -11,6 +11,7 @@ import hashlib
 import logging
 import sys
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -54,6 +55,9 @@ class Source:
     user_agent: str | None = None
     # Adapter-specific parameters (e.g. an EDGAR CIK list); ignored by RSS.
     options: dict = field(default_factory=dict)
+    # Set enabled = false in sources.toml to park a source (e.g. one behind a
+    # bot challenge) without deleting its configuration.
+    enabled: bool = True
 
 
 @dataclass
@@ -85,16 +89,20 @@ class Article:
 # TOML keys we accept on a [[sources]] table. Anything else is ignored so an
 # unknown adapter's stray field can't crash load; kind/user_agent/options are
 # optional and fall back to the Source defaults when absent.
-_SOURCE_FIELDS = ("name", "url", "category", "priority", "kind", "user_agent", "options")
+_SOURCE_FIELDS = ("name", "url", "category", "priority", "kind", "user_agent", "options", "enabled")
 
 
 def load_sources(config_path: Path) -> list[Source]:
     with open(config_path, "rb") as f:
         data = tomllib.load(f)
-    return [
+    loaded = [
         Source(**{k: v for k, v in entry.items() if k in _SOURCE_FIELDS})
         for entry in data["sources"]
     ]
+    disabled = [src.name for src in loaded if not src.enabled]
+    if disabled:
+        log.info("Skipping %d disabled source(s): %s", len(disabled), ", ".join(disabled))
+    return [src for src in loaded if src.enabled]
 
 
 def _fetch_rss(source: Source, client: httpx.Client) -> list[Article]:
@@ -158,27 +166,37 @@ def fetch_source(source: Source, client: httpx.Client) -> list[Article]:
     return ingestor(source, client)
 
 
+# Concurrent source fetches. Sources are independent, and at 30+ of them the
+# sequential fetch was the slowest non-LLM stage (~30 s). httpx.Client is
+# thread-safe, so one shared client feeds a small pool.
+FETCH_WORKERS = 8
+
+
 def fetch_all(sources: list[Source]) -> list[Article]:
-    """Fetch every source sequentially; concurrency is overkill at ~10 feeds."""
+    """Fetch every source concurrently; results keep the config order."""
     headers = {"User-Agent": USER_AGENT}
+
+    def _fetch_one(src: Source, client: httpx.Client) -> list[Article]:
+        # Belt-and-suspenders isolation: each ingestor already catches its
+        # expected HTTP/parse errors, but the non-RSS adapters have many more
+        # failure surfaces (a typo'd config CSS selector raises
+        # SelectorSyntaxError, a malformed options shape raises AttributeError,
+        # a bad URL raises httpx.InvalidURL — none of which are httpx.HTTPError).
+        # Any such surprise must skip just this source, never sink the run and
+        # lose every source after it.
+        try:
+            new = fetch_source(src, client)
+        except Exception as e:  # noqa: BLE001 — one bad source can't kill the run
+            log.warning("Skipping %s: unexpected fetch error: %s", src.name, e)
+            return []
+        log.info("Fetched %d items from %s", len(new), src.name)
+        return new
+
     with httpx.Client(headers=headers, timeout=FETCH_TIMEOUT) as client:
-        articles = []
-        for src in sources:
-            # Belt-and-suspenders isolation: each ingestor already catches its
-            # expected HTTP/parse errors, but the non-RSS adapters have many more
-            # failure surfaces (a typo'd config CSS selector raises
-            # SelectorSyntaxError, a malformed options shape raises AttributeError,
-            # a bad URL raises httpx.InvalidURL — none of which are httpx.HTTPError).
-            # Any such surprise must skip just this source, never sink the run and
-            # lose every source after it.
-            try:
-                new = fetch_source(src, client)
-            except Exception as e:  # noqa: BLE001 — one bad source can't kill the run
-                log.warning("Skipping %s: unexpected fetch error: %s", src.name, e)
-                continue
-            log.info("Fetched %d items from %s", len(new), src.name)
-            articles.extend(new)
-    return articles
+        workers = min(FETCH_WORKERS, max(1, len(sources)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            per_source = list(pool.map(lambda s: _fetch_one(s, client), sources))
+    return [a for items in per_source for a in items]
 
 
 def filter_recent(

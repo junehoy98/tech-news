@@ -95,38 +95,77 @@ priority = 3
 # The relevance ranker will filter out the noise.
 # ---------------------------------------------------------------------------
 
+# The Elec: English-language Korean supply-chain coverage (Samsung / SK hynix
+# tool orders, Korean equipment makers) — a beat no other source here carries.
 [[sources]]
-name = "Hacker News (ASML query)"
-url = "https://hnrss.org/newest?q=ASML&points=5"
+name = "The Elec (Korea semiconductor)"
+url = "https://www.thelec.net/rss/allArticle.xml"
 category = "company"
-priority = 1
+priority = 2
 
+# TrendForce press center: market-research angle (memory pricing, fab capacity,
+# capex forecasts).
 [[sources]]
-name = "Hacker News (KLA/lithography/EUV)"
-url = "https://hnrss.org/newest?q=KLA+OR+lithography+OR+EUV&points=5"
-category = "tech"
-priority = 1
-
-[[sources]]
-name = "Hacker News (TSMC/Samsung/Intel fab)"
-url = "https://hnrss.org/newest?q=%28TSMC+OR+%22Samsung+foundry%22+OR+%22Intel+foundry%22%29+fab&points=10"
+name = "TrendForce (Semiconductors)"
+url = "https://www.trendforce.com/feed/Semiconductors.html"
 category = "business"
 priority = 2
 
+# Nikon corporate news — the only litho-adjacent maker with a working RSS feed;
+# covers Nikon Precision (litho) alongside imaging (ranker filters the rest).
 [[sources]]
-name = "Hacker News (chip export controls)"
-url = "https://hnrss.org/newest?q=%22export+controls%22+%28chip+OR+semiconductor%29&points=5"
+name = "Nikon (corporate news)"
+url = "https://www.nikon.com/company/rss/feeds/news.rss"
+category = "company"
+priority = 2
+
+# EU Commission DG Trade: the EU-side counterpart of the Federal Register
+# source for export-control / trade-instrument news. General trade feed, so
+# most items are off-topic — the ranker filters.
+[[sources]]
+name = "EU Commission (DG Trade)"
+url = "https://policy.trade.ec.europa.eu/node/2/rss_en"
 category = "policy"
-priority = 1
+priority = 3
+
+# Hacker News keyword coverage now goes through the Algolia HN Search API
+# (kind = "hn_algolia") instead of the hnrss.org bridge, which 502'd in 3 of 4
+# observed runs and silently zeroed ALL keyword coverage when it did. Each
+# entry runs one API call per query; queries are single keywords/phrases (the
+# adapter dedupes overlapping hits by URL).
 
 [[sources]]
-name = "Hacker News (CHIPS Act / Taiwan)"
-url = "https://hnrss.org/newest?q=%28%22CHIPS+Act%22+OR+%22Taiwan+chip%22+OR+%22semiconductor+policy%22%29&points=5"
+name = "Hacker News (equipment & lithography)"
+url = "https://hn.algolia.com/api/v1/search_by_date"
+category = "tech"
+priority = 1
+kind = "hn_algolia"
+options = { min_points = 5, queries = ["ASML", "KLA", "lithography", "EUV", "Lam Research", "Applied Materials"] }
+
+[[sources]]
+name = "Hacker News (fabs & chip policy)"
+url = "https://hn.algolia.com/api/v1/search_by_date"
+category = "policy"
+priority = 2
+kind = "hn_algolia"
+options = { min_points = 5, queries = ["TSMC fab", "Samsung foundry", "Intel foundry", "export controls semiconductor", "CHIPS Act", "Taiwan chip"] }
+
+# Google News aggregation for the export-control beat: catches the policy/legal
+# outlets (think-tank analyses, national press) that have no usable RSS of
+# their own. NOTE: item links are news.google.com redirects, so full-text
+# enrichment usually fails and the ranker scores on the headline — acceptable
+# for a discovery feed.
+[[sources]]
+name = "Google News (chip export controls)"
+url = "https://news.google.com/rss/search?q=%22export+controls%22+semiconductor&hl=en-US&gl=US&ceid=US:en"
 category = "policy"
 priority = 2
 
 # ---------------------------------------------------------------------------
 # Opinion & analysis — independent commentary, not straight reporting.
+# YouTube channel uploads arrive as Atom feeds; items are titles + video links
+# (no transcript), so they rank on the headline. Both channels are
+# industry-commentary heavy; the ranker drops the off-topic remainder.
 # Both Substacks publish FULL article text in RSS for free posts; paid /
 # subscriber-only posts arrive as a "Read more" stub (title-only to the
 # ranker). The ranker handles both — stubs just score on the headline.
@@ -167,6 +206,24 @@ priority = 2
 # Each carries adapter-specific `options` (a filer list / agency slugs). The
 # adapters degrade to [] on any HTTP/parse error, so a bad ticker or a flaky
 # API never sinks the run — same contract as the RSS path.
+[[sources]]
+name = "More Than Moore (Ian Cutress)"
+url = "https://morethanmoore.substack.com/feed"
+category = "opinion"
+priority = 2
+
+[[sources]]
+name = "TechTechPotato (YouTube)"
+url = "https://www.youtube.com/feeds/videos.xml?channel_id=UC1r0DG-KEPyqOeW6o79PByw"
+category = "opinion"
+priority = 3
+
+[[sources]]
+name = "Asianometry (YouTube)"
+url = "https://www.youtube.com/feeds/videos.xml?channel_id=UC1LpsuAUaKoMzzJSEt5WImw"
+category = "opinion"
+priority = 3
+
 # ---------------------------------------------------------------------------
 
 # SEC EDGAR — material-event filings for the equipment makers we track. SEC
@@ -265,16 +322,47 @@ kind = "scrape"
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 options = { page_url = "https://ontoinnovation.com/news", base_url = "https://ontoinnovation.com", item = ".news-article-item", title = ".news-article-item__title", link = ".news-article-item__title", date = ".news-article-item__date" }
 
-# SEMI.org currently sits behind a Cloudflare "Just a moment..." JS challenge
-# that a plain HTTP client can't pass, so this source 403s and the adapter
-# degrades to []. It's wired up (selectors are a best guess) so that if/when
-# the challenge is lifted or a headless-browser fetch path is added, it starts
-# producing items. Re-derive the selectors against a real page body first.
+# ASM International (ALD leader) newsroom. Selectors derived from a live fetch
+# on 2026-08-21: each item is an <a class="article-items__anchor"> card with an
+# <h3 class="article-items__item-title"> headline and a
+# <span class="article-items__item-label"> "News - August 11, 2026" label (the
+# adapter's fuzzy date pass digs the date out of that text).
+[[sources]]
+name = "ASM International (news)"
+url = "https://www.asm.com/News"
+category = "company"
+priority = 1
+kind = "scrape"
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+options = { page_url = "https://www.asm.com/News", base_url = "https://www.asm.com", item = "a.article-items__anchor", title = "h3.article-items__item-title", link = "", date = "span.article-items__item-label" }
+
+# SEMI.org sits behind a Cloudflare "Just a moment..." JS challenge that a
+# plain HTTP client can't pass — it has 403'd on every run since it was added
+# and the selectors were never validated against a real page body. Parked with
+# enabled = false until a headless-browser fetch path exists; re-derive the
+# selectors against a real page body before re-enabling.
 [[sources]]
 name = "SEMI.org (news / press releases)"
 url = "https://www.semi.org/en/news-media-press-releases"
 category = "business"
 priority = 2
 kind = "scrape"
+enabled = false
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 options = { page_url = "https://www.semi.org/en/news-media-press-releases", base_url = "https://www.semi.org", item = "div.views-row", title = "a", link = "a", date = "time" }
+
+# --- Scrape candidates verified reachable (HTTP 200) on 2026-08-21 but NOT
+# --- yet wired, either because the listing is JS-rendered (needs a headless
+# --- fetch path) or because selectors haven't been derived from a live fetch:
+# ---   Tokyo Electron   https://www.tel.com/news/          (JS-rendered list — confirmed empty for a static fetch)
+# ---   Advantest        https://www.advantest.com/en/news/
+# ---   Veeco            https://www.veeco.com/company/news/
+# ---   Screen Holdings  https://www.screen.co.jp/en/news
+# ---   Canon            https://global.canon/en/news/
+# ---   Disco            https://www.disco.co.jp/eg/news/
+# ---   Lasertec         https://www.lasertec.co.jp/en/news/
+# ---   Lam Research     https://newsroom.lamresearch.com/press-releases
+# --- Not feasible (checked 2026-08-21): LinkedIn (no public feeds, aggressive
+# --- anti-bot, ToS), BIS press RSS (none on bis.gov), Applied Materials
+# --- newsroom (403/JS), eeNews Europe (WAF 403), Zeiss SMT (JS-rendered),
+# --- free earnings-call transcript feeds (none found).

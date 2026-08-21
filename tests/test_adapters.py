@@ -544,3 +544,87 @@ def test_scrape_no_page_url_returns_empty():
 
     assert fetch_source(src, client) == []
     client.get.assert_not_called()
+
+
+def test_hn_algolia_builds_articles_and_dedupes_across_queries():
+    from tech_news.adapters import fetch_hn_algolia
+
+    hits_page = {
+        "hits": [
+            {
+                "title": "ASML ships first High-NA tool",
+                "url": "https://example.com/asml",
+                "objectID": "1",
+                "created_at": "2026-08-20T20:39:07Z",
+                "story_text": None,
+            },
+            {
+                "title": "Ask HN: EUV explained?",
+                "url": None,
+                "objectID": "42",
+                "created_at": "2026-08-19T10:00:00Z",
+                "story_text": "<p>some text</p>",
+            },
+        ]
+    }
+    resp = MagicMock()
+    resp.raise_for_status.return_value = None
+    resp.json.return_value = hits_page
+    client = MagicMock()
+    client.get.return_value = resp
+
+    src = Source(
+        name="HN",
+        url="https://hn.algolia.com/api/v1/search_by_date",
+        category="tech",
+        priority=1,
+        kind="hn_algolia",
+        options={"queries": ["ASML", "EUV"], "min_points": 5},
+    )
+    articles = fetch_hn_algolia(src, client)
+
+    # Two queries, same hits page returned for both -> deduped by URL.
+    assert client.get.call_count == 2
+    assert len(articles) == 2
+    assert articles[0].url == "https://example.com/asml"
+    assert articles[0].published.isoformat() == "2026-08-20T20:39:07+00:00"
+    # Link-less story falls back to the HN discussion page; HTML is stripped.
+    assert articles[1].url == "https://news.ycombinator.com/item?id=42"
+    assert "<p>" not in articles[1].summary
+    # The noise-control params must be present on the API call.
+    params = client.get.call_args.kwargs.get("params") or client.get.call_args.args[1]
+    assert params["restrictSearchableAttributes"] == "title"
+    assert params["numericFilters"] == "points>=5"
+
+
+def test_hn_algolia_failed_query_is_skipped():
+    from tech_news.adapters import fetch_hn_algolia
+
+    bad = MagicMock()
+    bad.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "502", request=MagicMock(), response=MagicMock()
+    )
+    good = MagicMock()
+    good.raise_for_status.return_value = None
+    good.json.return_value = {
+        "hits": [
+            {
+                "title": "KLA acquires a metrology startup",
+                "url": "https://example.com/kla",
+                "objectID": "7",
+                "created_at": "2026-08-18T00:00:00Z",
+            }
+        ]
+    }
+    client = MagicMock()
+    client.get.side_effect = [bad, good]
+    src = Source(
+        name="HN",
+        url="x",
+        category="tech",
+        priority=1,
+        kind="hn_algolia",
+        options={"queries": ["ASML", "KLA"]},
+    )
+    articles = fetch_hn_algolia(src, client)
+    assert [a.url for a in articles] == ["https://example.com/kla"]
