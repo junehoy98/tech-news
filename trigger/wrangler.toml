@@ -2,12 +2,16 @@ name = "tech-news-trigger"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
-# 12:30 UTC, Mon–Fri = 08:30 ET (summer, EDT) / 07:30 ET (winter, EST) — safely
+# 12:30 UTC, Mon-Fri = 08:30 ET (summer, EDT) / 07:30 ET (winter, EST) — safely
 # before the 08:58 ET send in both seasons. The digest job's --send-at gate pins
 # the exact delivery time, so this fixed-UTC cron needs no DST handling of its
 # own; it just has to start the runner with margin to spare.
+#
+# Day-of-week uses NAMED days on purpose: Cloudflare cron numbers weekdays
+# 1-7 with 1 = SUNDAY (unlike Unix/GitHub cron where 1 = Monday). The old
+# "1-5" therefore meant Sun-Thu and caused the extra Sunday email.
 [triggers]
-crons = ["30 12 * * 1-5"]
+crons = ["30 12 * * MON-FRI"]
 
 # Non-secret config consumed by worker.js. The PAT is NOT here — it's set as an
 # encrypted secret via `wrangler secret put GH_DISPATCH_TOKEN`.

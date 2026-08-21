@@ -64,6 +64,10 @@ THREAD_CONTEXT_DAYS = 10
 # run of busy days can't balloon the synthesis prompt. Most recent days first.
 MAX_THREAD_BRIEFS = 24
 
+# Same idea for the "Prior topic tags" line: newest-first, bounded, so the tag
+# list can never balloon the prompt the way the pre-fix all-ranked harvest did.
+MAX_THREAD_TAGS = 40
+
 # Default archive location, mirroring main.py's data/digest_archive.jsonl under
 # the project root. Injectable so tests can point at a seeded fixture (or skip
 # threading entirely with a nonexistent path).
@@ -202,6 +206,7 @@ def synthesize(
     client: anthropic.Anthropic | None = None,
     target_briefs: int = DEFAULT_TARGET_BRIEFS,
     archive_path: Path = DEFAULT_ARCHIVE_PATH,
+    digest_date: date | None = None,
 ) -> Digest:
     """Cluster top-ranked items into a small set of briefs.
 
@@ -209,13 +214,18 @@ def synthesize(
     folded into a "previously reported" block so the model writes the UPDATE on
     a continuing story rather than re-introducing it cold. A missing or empty
     archive (cold start) yields no thread block and behaves exactly as before.
+
+    `digest_date` is the date stamped on the digest; the caller passes the
+    date in the SEND timezone (a UTC runner's date.today() can be tomorrow
+    relative to an 08:58 America/New_York send). Defaults to local today.
     """
+    digest_date = digest_date or date.today()
     if not ranked:
-        return _empty_digest(total_fetched)
+        return _empty_digest(total_fetched, digest_date)
 
     candidates = [r for r in ranked if r.score >= MIN_SCORE_FOR_SYNTHESIS][:CANDIDATE_POOL_SIZE]
     if not candidates:
-        return _empty_digest(total_fetched)
+        return _empty_digest(total_fetched, digest_date)
 
     client = client or anthropic.Anthropic()
     rubric = criteria_path.read_text(encoding="utf-8")
@@ -233,10 +243,12 @@ def synthesize(
     parsed = response.parsed_output
     if parsed is None:
         log.error("Synthesis returned no parsed output; stop_reason=%s", response.stop_reason)
-        return _empty_digest(total_fetched)
+        return _empty_digest(total_fetched, digest_date)
+
+    _clean_citations(parsed, candidates)
 
     return Digest(
-        date=date.today(),
+        date=digest_date,
         email_subject=parsed.email_subject,
         intro=parsed.intro,
         lead_brief=parsed.lead_brief,
@@ -246,9 +258,9 @@ def synthesize(
     )
 
 
-def _empty_digest(total_fetched: int) -> Digest:
+def _empty_digest(total_fetched: int, digest_date: date | None = None) -> Digest:
     return Digest(
-        date=date.today(),
+        date=digest_date or date.today(),
         email_subject="Semi Daily — no qualifying news",
         intro="Nothing crossed today's relevance threshold.",
         lead_brief=None,
@@ -256,6 +268,36 @@ def _empty_digest(total_fetched: int) -> Digest:
         total_kept=0,
         total_fetched=total_fetched,
     )
+
+
+def _clean_citations(parsed: SynthesisResponse, candidates: list[RankedArticle]) -> None:
+    """Dedupe each brief's citations and drop any URL not in the candidate set.
+
+    The prompt forbids invented citations, but nothing used to enforce it, and
+    duplicate citations ("Tom's Hardware, Tom's Hardware") shipped in practice.
+    Mutates the parsed briefs in place. A brief whose citations ALL turn out
+    invalid keeps an empty list — the template tolerates it — and logs loudly,
+    because that brief is unsourced prose.
+    """
+    valid_urls = {r.article.url for r in candidates}
+    briefs = ([parsed.lead_brief] if parsed.lead_brief else []) + list(parsed.briefs)
+    for b in briefs:
+        seen: set[str] = set()
+        kept: list[Citation] = []
+        for c in b.citations:
+            if c.url in seen:
+                continue
+            seen.add(c.url)
+            if c.url not in valid_urls:
+                log.warning(
+                    "Dropping citation not in candidate set: %r (%s) on brief %r",
+                    c.source, c.url, b.headline,
+                )
+                continue
+            kept.append(c)
+        if not kept and b.citations:
+            log.error("Brief %r has no valid citations left after cleaning", b.headline)
+        b.citations = kept
 
 
 def _build_thread_context(archive_path: Path) -> str:
@@ -290,6 +332,8 @@ def _build_thread_context(archive_path: Path) -> str:
     for record in reversed(recent):
         date_str = record.get("date", "?")
         for tag in record.get("topic_tags", []) or []:
+            if len(tags) >= MAX_THREAD_TAGS:
+                break
             if tag and tag not in tags:
                 tags.append(tag)
 

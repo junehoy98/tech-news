@@ -27,9 +27,12 @@ log = logging.getLogger(__name__)
 def _digest_record(digest: Digest, ranked: list) -> dict:
     """Shape one digest (plus the ranked pool that fed it) into a JSON dict.
 
-    `ranked` is the list[RankedArticle] handed to the synthesizer; we keep the
-    distinct topic_tags off it so a later threading pass can match stories
-    across days without re-deriving them.
+    `ranked` is the list[RankedArticle] handed to the synthesizer. We keep the
+    distinct topic_tags of the articles the digest actually CITED — not the
+    whole scored pool — so the threading pass matches stories we truly
+    reported. (Harvesting from all of `ranked` once fed ~175 tags/day of
+    never-published stories into the "previously reported" block, telling the
+    synthesizer it had covered things it hadn't.)
     """
     def _brief_dict(b) -> dict:
         return {
@@ -45,12 +48,18 @@ def _digest_record(digest: Digest, ranked: list) -> dict:
     # qualified" day (empty digest).
     lead_brief = _brief_dict(digest.lead_brief) if digest.lead_brief else None
 
-    # Distinct topic_tags, in first-seen order, skipping the empty tag the
-    # ranker assigns to omitted/unscored items.
+    # Distinct topic_tags of CITED articles only, in first-seen order,
+    # skipping the empty tag the ranker assigns to omitted/unscored items.
+    cited_urls = {
+        c["url"]
+        for b in briefs + ([lead_brief] if lead_brief else [])
+        for c in b["citations"]
+    }
     topic_tags: list[str] = []
     for r in ranked:
         tag = getattr(r, "topic_tag", "")
-        if tag and tag not in topic_tags:
+        url = getattr(getattr(r, "article", None), "url", None)
+        if tag and url in cited_urls and tag not in topic_tags:
             topic_tags.append(tag)
 
     return {

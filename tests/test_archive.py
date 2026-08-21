@@ -54,12 +54,15 @@ def _digest(
     )
 
 
-def _ranked(article_factory, tags: list[str]) -> list[RankedArticle]:
+def _ranked(
+    article_factory, tags: list[str], urls: list[str] | None = None
+) -> list[RankedArticle]:
     out = []
     for i, tag in enumerate(tags):
+        url = urls[i] if urls else f"https://example.com/{i}"
         out.append(
             RankedArticle(
-                article=article_factory(url=f"https://example.com/{i}"),
+                article=article_factory(url=url),
                 score=8,
                 category="company",
                 topic_tag=tag,
@@ -71,9 +74,19 @@ def _ranked(article_factory, tags: list[str]) -> list[RankedArticle]:
 def test_append_then_read_roundtrip(tmp_path, article_factory):
     path = tmp_path / "digest_archive.jsonl"
     digest = _digest()
+    # Tags are harvested only from articles the digest actually CITED: the
+    # duplicate tag collapses, the empty tag drops, and the uncited article's
+    # tag ("Unreported story") must NOT leak into the record.
     ranked = _ranked(
         article_factory,
-        ["ASML High-NA shipment", "BIS export rules", "ASML High-NA shipment", ""],
+        ["ASML High-NA shipment", "BIS export rules", "ASML High-NA shipment", "", "Unreported story"],
+        urls=[
+            "https://semiwiki.com/asml",
+            "https://fr.gov/bis",
+            "https://asml.com/highna",
+            "https://asml.com/highna",
+            "https://example.com/uncited",
+        ],
     )
 
     append_digest(digest, ranked, path)
@@ -99,7 +112,8 @@ def test_append_then_read_roundtrip(tmp_path, article_factory):
     assert rec["briefs"][0]["headline"] == "BIS widens semiconductor export controls"
     assert rec["briefs"][0]["category"] == "policy"
 
-    # Distinct topic_tags, deduped and order-preserved, empty tag dropped.
+    # Distinct topic_tags of CITED articles only: deduped, order-preserved,
+    # empty tag dropped, uncited article's tag excluded.
     assert rec["topic_tags"] == ["ASML High-NA shipment", "BIS export rules"]
 
 

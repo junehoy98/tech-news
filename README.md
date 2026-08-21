@@ -83,7 +83,7 @@ automatically every morning without your laptop needing to be on.
    (manual trigger to test it works in the cloud)
 5. The workflow is already scheduled for weekday mornings. Because GitHub's
    cron can lag by hours, it starts a runner early and the job waits until
-   ~9 AM ET to send, so the delivery time stays fixed regardless of scheduler
+   just before 9 AM ET (08:58 ET) to send, so the delivery time stays fixed regardless of scheduler
    lag. See the comments in `.github/workflows/daily.yml` for the details.
 
 ### Punctual delivery (optional): external trigger

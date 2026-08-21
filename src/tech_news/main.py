@@ -185,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         total_fetched=len(new_articles),
         target_briefs=args.target_briefs,
         archive_path=root / "data" / "digest_archive.jsonl",
+        digest_date=datetime.now(ZoneInfo(args.send_tz)).date(),
     )
     log.info("Digest: %d briefs from %d candidates", len(digest.briefs), digest.total_kept)
     log.info("Email subject would be: %r", f"{digest.email_subject} — {digest.date_short}")

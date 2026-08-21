@@ -11,7 +11,10 @@ from .sources import Article
 
 UTC = timezone.utc
 
-DEFAULT_RETENTION_DAYS = 14
+# 45 days (was 14): scraped press-release listings whose dates fail to parse
+# fall back to "now" and would resurface as new right after their fingerprint
+# was pruned. A longer memory closes that loop cheaply.
+DEFAULT_RETENTION_DAYS = 45
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_articles (
